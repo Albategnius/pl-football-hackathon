@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Producer Co-pilot - live graphics desk</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">PC</span>
+      <div>
+        <div class="brand-name">Producer Co-pilot</div>
+        <div class="brand-sub">Agent-assisted live graphics desk</div>
+      </div>
+    </div>
+    <div class="scorebug" id="scorebug"></div>
+    <div class="controls">
+      <button id="btn-start" class="btn primary">Start</button>
+      <button id="btn-pause" class="btn">Pause</button>
+      <button id="btn-reset" class="btn">Reset</button>
+      <label class="ctl">Speed
+        <select id="speed">
+          <option value="5">5x</option>
+          <option value="10">10x</option>
+          <option value="15">15x</option>
+          <option value="30">30x</option>
+          <option value="60">60x</option>
+          <option value="120">120x</option>
+        </select>
+      </label>
+      <label class="ctl">Club feed
+        <select id="club"></select>
+      </label>
+      <label class="ctl toggle" title="Corrupts one number in each first draft so you can watch the Fact Checker reject it">
+        <input type="checkbox" id="faults"> Fault injection
+      </label>
+      <span class="badge" id="mode"></span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="col left">
+      <div class="panel">
+        <h2>Live feed</h2>
+        <svg id="pitch" viewBox="-2 -2 109 72" class="pitch"></svg>
+        <div id="momentum" class="momentum"></div>
+        <div id="statbars" class="statbars"></div>
+      </div>
+      <div class="panel grow">
+        <h2>Event ticker</h2>
+        <ol id="ticker" class="ticker"></ol>
+      </div>
+    </section>
+
+    <section class="col center">
+      <div class="panel grow">
+        <h2>Suggestion queue <span class="hint">agents propose, you decide</span></h2>
+        <div id="queue" class="queue"></div>
+      </div>
+    </section>
+
+    <section class="col right">
+      <div class="panel">
+        <h2>On-air preview</h2>
+        <div class="feed-tabs" id="feed-tabs"></div>
+        <div class="screen" id="screen">
+          <div class="screen-bug" id="screen-bug"></div>
+          <div class="screen-gfx" id="screen-gfx"></div>
+        </div>
+        <details class="cue">
+          <summary>Last overlay cue (JSON for the graphics engine)</summary>
+          <pre id="cue-json">No cues yet.</pre>
+        </details>
+      </div>
+      <div class="panel">
+        <h2>Studio package <button id="btn-package" class="btn small">Build now</button></h2>
+        <div id="package" class="package muted">Built automatically at half-time and full-time.</div>
+      </div>
+      <div class="panel grow">
+        <h2>Audit log</h2>
+        <ol id="audit" class="audit"></ol>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

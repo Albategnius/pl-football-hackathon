@@ -1,0 +1,342 @@
+"""Producer Console server: replays a synthetic match and runs the agent pipeline live."""
+
+from __future__ import annotations
+
+import asyncio
+import itertools
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+load_dotenv()
+
+from .agents import adapt_feeds, build_gateway, run_graphic_pipeline, studio_package  # noqa: E402
+from .factcheck import check_graphic  # noqa: E402
+from .generator import generate_match  # noqa: E402
+from .moments import Candidate, MomentDetector  # noqa: E402
+from .stats import MatchState  # noqa: E402
+from .templates import FEEDS, TEMPLATES  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+WEB = ROOT / "web"
+DATA = ROOT / "data"
+
+
+def load_match(seed: int) -> dict:
+    path = DATA / f"match_{seed}.json"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(generate_match(seed), indent=1))
+    return json.loads(path.read_text())
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+class Session:
+    def __init__(self, seed: int):
+        self.seed = seed
+        self.gw = build_gateway()
+        self.clients: set[asyncio.Queue] = set()
+        self.speed = float(os.getenv("REPLAY_SPEED", "15"))
+        self.inject_faults = os.getenv("INJECT_FAULTS", "0") == "1"
+        self.replay_task: asyncio.Task | None = None
+        self.worker_task: asyncio.Task | None = None
+        self.reset()
+
+    # --- lifecycle ----------------------------------------------------------
+
+    def reset(self) -> None:
+        for task in (getattr(self, "replay_task", None), getattr(self, "worker_task", None)):
+            if task:
+                task.cancel()
+        self.replay_task = self.worker_task = None
+        self.match = load_match(self.seed)
+        self.meta = self.match["meta"]
+        self.state = MatchState(self.meta)
+        self.detector = MomentDetector(self.state)
+        self.idx = 0
+        self.running = False
+        self.club = self.meta["home"]
+        self.suggestions: dict[str, dict] = {}
+        self.candidates: dict[str, Candidate] = {}
+        self.overlays: list[dict] = []
+        self.audit: list[dict] = []
+        self.packages: list[dict] = []
+        self.queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+        self._seq = itertools.count()
+
+    def ensure_worker(self) -> None:
+        if self.worker_task is None or self.worker_task.done():
+            self.worker_task = asyncio.create_task(self._worker())
+
+    def start(self) -> None:
+        self.ensure_worker()
+        self.running = True
+        if self.replay_task is None or self.replay_task.done():
+            self.replay_task = asyncio.create_task(self._replay())
+
+    # --- broadcasting -------------------------------------------------------
+
+    async def broadcast(self, kind: str, data) -> None:
+        msg = f"event: {kind}\ndata: {json.dumps(data)}\n\n"
+        for q in list(self.clients):
+            q.put_nowait(msg)
+
+    def log(self, action: str, suggestion_id: str | None, details: str = "", actor: str = "producer") -> dict:
+        entry = {"at": now_iso(), "match_minute": self.state.snapshot()["minute"], "actor": actor,
+                 "action": action, "suggestion_id": suggestion_id, "details": details}
+        self.audit.append(entry)
+        return entry
+
+    # --- replay -------------------------------------------------------------
+
+    async def _replay(self) -> None:
+        events = self.match["events"]
+        last_stats = 0.0
+        loop = asyncio.get_running_loop()
+        while self.idx < len(events):
+            if not self.running:
+                await asyncio.sleep(0.2)
+                continue
+            ev = events[self.idx]
+            dt = max(0.0, ev["t"] - self.state.t)
+            await asyncio.sleep(min(dt / self.speed, 1.5))
+            self.state.apply(ev)
+            self.idx += 1
+            await self.broadcast("match_event", ev)
+            for c in self.detector.check(ev):
+                self.candidates[c.id] = c
+                self.suggestions[c.id] = {"id": c.id, "candidate": c.to_dict(), "status": "queued", "trace": []}
+                await self.broadcast("suggestion", self.suggestions[c.id])
+                await self.queue.put((-c.priority, c.t, next(self._seq), c.id))
+            if loop.time() - last_stats > 0.4 or ev["type"] in ("goal", "half_end", "full_time"):
+                last_stats = loop.time()
+                await self.broadcast("stats", self.state.snapshot())
+            if ev["type"] in ("half_end", "full_time"):
+                asyncio.create_task(self.make_package("half_time" if ev["type"] == "half_end" else "full_time"))
+        self.running = False
+        await self.broadcast("status", self.status())
+
+    async def _worker(self) -> None:
+        while True:
+            _, _, _, cid = await self.queue.get()
+            c = self.candidates.get(cid)
+            sug = self.suggestions.get(cid)
+            if not c or not sug:
+                continue
+            sug["status"] = "drafting"
+            await self.broadcast("suggestion", sug)
+
+            async def notify(kind: str, payload: dict, sug=sug) -> None:
+                sug["trace"].append(payload)
+                await self.broadcast("trace", payload)
+
+            recent = lambda: [self.candidates[s["id"]] for s in self.suggestions.values()  # noqa: E731
+                              if s["status"] in ("pending", "approved", "on_air") and s["id"] in self.candidates]
+            try:
+                job = await run_graphic_pipeline(c, self.gw, clock=lambda: self.state.t, recent=recent,
+                                                 notify=notify, inject_faults=self.inject_faults)
+            except Exception as exc:  # keep the console alive whatever happens
+                sug["status"], sug["dropped_reason"] = "dropped", f"pipeline error: {exc}"
+                await self.broadcast("suggestion", sug)
+                continue
+            sug.update({"status": job.status, "analysis": job.analysis, "graphic": job.graphic,
+                        "attempts": len(job.attempts), "dropped_reason": job.dropped_reason,
+                        "proposed_at_t": self.state.t})
+            if job.status == "pending":
+                self.log("proposed", cid, f"{job.graphic['template']} after {len(job.attempts)} draft(s)", actor="agents")
+            await self.broadcast("suggestion", sug)
+
+    # --- producer actions ---------------------------------------------------
+
+    async def approve(self, sid: str, slots: dict | None) -> dict:
+        sug = self._pending(sid)
+        c = self.candidates[sid]
+        graphic = {"template": sug["graphic"]["template"], "slots": slots or sug["graphic"]["slots"]}
+        if slots:
+            issues = check_graphic(graphic, c.facts)
+            if issues:
+                raise HTTPException(400, {"issues": issues})
+            sug["graphic"] = {**sug["graphic"], "slots": slots, "edited": True}
+            self.log("edited", sid, json.dumps(slots))
+        sug["status"] = "adapting"
+        await self.broadcast("suggestion", sug)
+        club_name = self.meta["teams"][0 if self.club == self.meta["home"] else 1]["name"]
+        feeds, source = await adapt_feeds(self.gw, c, graphic, club_name)
+        t_in = self.state.t
+        duration = TEMPLATES[graphic["template"]]["duration_s"]
+        new_overlays = []
+        for feed, content in feeds.items():
+            ov = {"id": f"{sid}-{feed}", "suggestion_id": sid, "feed": feed, "template": graphic["template"],
+                  "t_in": t_in, "t_out": t_in + duration, "duration_s": duration, "slots": content["slots"],
+                  "data": self._overlay_data(c), "source_event_ids": c.source_event_ids,
+                  "content_source": content["source"]}
+            new_overlays.append(ov)
+        self.overlays.extend(new_overlays)
+        sug.update({"status": "approved", "feeds": feeds, "approved_at_t": t_in})
+        self.log("approved", sid, f"on air in {len(feeds)} feeds (adapter: {source})")
+        await self.broadcast("suggestion", sug)
+        await self.broadcast("overlays", new_overlays)
+        await self.broadcast("audit", self.audit[-1])
+        return sug
+
+    def _overlay_data(self, c: Candidate) -> dict:
+        data = {"team": c.team, "kind": c.kind, "minute": c.minute}
+        if c.kind == "momentum_swing":
+            data["momentum"] = c.facts["momentum_now"] * (1 if c.team == self.meta["home"] else -1)
+        return data
+
+    async def reject(self, sid: str, reason: str) -> dict:
+        sug = self._pending(sid)
+        sug["status"], sug["reject_reason"] = "rejected", reason
+        self.log("rejected", sid, reason)
+        await self.broadcast("suggestion", sug)
+        await self.broadcast("audit", self.audit[-1])
+        return sug
+
+    def _pending(self, sid: str) -> dict:
+        sug = self.suggestions.get(sid)
+        if not sug:
+            raise HTTPException(404, "unknown suggestion")
+        if sug["status"] != "pending":
+            raise HTTPException(409, f"suggestion is {sug['status']}")
+        return sug
+
+    async def make_package(self, phase: str) -> dict:
+        approved = [s for s in self.suggestions.values() if s["status"] == "approved"]
+        if not approved:
+            approved = [s for s in self.suggestions.values() if s["status"] == "pending"]
+        s = self.state
+        score = f"{s.teams[s.home]['short']} {s.score[s.home]}-{s.score[s.away]} {s.teams[s.away]['short']}"
+        totals = {s.teams[t]["short"]: s.totals(t) for t in (s.home, s.away)}
+        pkg = await studio_package(self.gw, phase, approved, totals, score)
+        pkg["created_minute"] = s.snapshot()["minute"]
+        self.packages.append(pkg)
+        self.log("studio_package", None, f"{phase} rundown with {len(pkg.get('rundown', []))} items", actor="agents")
+        await self.broadcast("package", pkg)
+        await self.broadcast("audit", self.audit[-1])
+        return pkg
+
+    def status(self) -> dict:
+        return {"running": self.running, "speed": self.speed, "inject_faults": self.inject_faults,
+                "club": self.club, "mode": self.gw.mode, "seed": self.seed,
+                "progress": self.idx / max(1, len(self.match["events"])),
+                "finished": self.idx >= len(self.match["events"])}
+
+    def full_state(self) -> dict:
+        return {"meta": self.meta, "status": self.status(), "stats": self.state.snapshot(),
+                "recent_events": self.state.events[-40:], "suggestions": list(self.suggestions.values()),
+                "overlays": self.overlays, "audit": self.audit, "packages": self.packages,
+                "templates": TEMPLATES, "feeds": FEEDS}
+
+
+app = FastAPI(title="Producer Co-pilot")
+session = Session(int(os.getenv("MATCH_SEED", "1")))
+app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+
+class Control(BaseModel):
+    action: str | None = None
+    speed: float | None = None
+    inject_faults: bool | None = None
+    club: str | None = None
+
+
+class Approve(BaseModel):
+    slots: dict[str, str] | None = None
+
+
+class Reject(BaseModel):
+    reason: str = "not for air"
+
+
+class PackageReq(BaseModel):
+    phase: str = "on_demand"
+
+
+@app.get("/")
+async def index():
+    return FileResponse(WEB / "index.html")
+
+
+@app.get("/api/state")
+async def get_state():
+    return session.full_state()
+
+
+@app.post("/api/control")
+async def control(body: Control):
+    if body.speed:
+        session.speed = max(1.0, min(body.speed, 240.0))
+    if body.inject_faults is not None:
+        session.inject_faults = body.inject_faults
+    if body.club in (session.meta["home"], session.meta["away"]):
+        session.club = body.club
+    if body.action == "start":
+        session.start()
+    elif body.action == "pause":
+        session.running = False
+    elif body.action == "reset":
+        session.reset()
+        await session.broadcast("reset", session.full_state())
+    await session.broadcast("status", session.status())
+    return session.status()
+
+
+@app.get("/api/stream")
+async def stream(request: Request):
+    q: asyncio.Queue = asyncio.Queue()
+    session.clients.add(q)
+
+    async def gen():
+        try:
+            yield "event: hello\ndata: {}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    yield await asyncio.wait_for(q.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            session.clients.discard(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/suggestions/{sid}/approve")
+async def approve(sid: str, body: Approve | None = None):
+    return await session.approve(sid, body.slots if body else None)
+
+
+@app.post("/api/suggestions/{sid}/reject")
+async def reject(sid: str, body: Reject | None = None):
+    return await session.reject(sid, body.reason if body else "not for air")
+
+
+@app.get("/api/overlays")
+async def overlays(feed: str | None = None):
+    """Timed, machine-readable overlay cues for a downstream graphics engine."""
+    items = [o for o in session.overlays if feed is None or o["feed"] == feed]
+    return {"match": {"seed": session.seed, "home": session.meta["home"], "away": session.meta["away"]},
+            "clock": "match seconds", "overlays": items}
+
+
+@app.get("/api/audit")
+async def audit():
+    return session.audit
+
+
+@app.post("/api/package")
+async def package(body: PackageReq):
+    return await session.make_package(body.phase)
