@@ -56,7 +56,8 @@ def test_fact_checker_rejects_invented_numbers_and_long_slots():
 
 
 def test_workflow_recovers_from_injected_fault(monkeypatch):
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
     monkeypatch.setenv("LLM_CACHE", "0")
     _, _, candidates = replay(1)
     c = next(x for x in candidates if x.kind == "sprint")

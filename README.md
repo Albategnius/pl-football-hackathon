@@ -54,7 +54,7 @@ The human producer stays in control. Edits made by hand are fact-checked too, an
 ## Microsoft technology
 
 - **Microsoft Agent Framework (Python):** the agents, the workflow graph with its retry cycle, and the executors.
-- **GitHub Models:** model inference (`openai/gpt-4.1-mini` by default) through Agent Framework's OpenAI-compatible chat client.
+- **Model access:** Agent Framework's OpenAI-compatible chat client, so any compatible provider works, Microsoft Foundry included. Switching providers only means changing `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`.
 - **GitHub Codespaces:** a one-click environment for judges (`.devcontainer/`).
 - **GitHub Copilot:** used while building the project.
 
@@ -64,13 +64,13 @@ Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-cp .env.example .env          # optional: add GITHUB_TOKEN for live models
+cp .env.example .env          # optional: set LLM_BASE_URL / LLM_API_KEY / LLM_MODEL for live models
 uv run uvicorn app.main:app --port 8000
 ```
 
 Then open http://localhost:8000 and press **Start**.
 
-- **With `GITHUB_TOKEN`:** you need a GitHub personal access token with the `models: read` permission. The agents call GitHub Models, and every reply is cached in `data/llm_cache.json`.
+- **With a model configured:** set `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` for any OpenAI-compatible API. `.env.example` has examples for OpenAI, Groq, Ollama and Microsoft Foundry. The agents call that model, and every reply is cached in `data/llm_cache.json`.
 - **Without a token:** the app replays cached replies first, then uses verified template fallbacks, so the full workflow still runs.
 - **Codespaces:** open the repo in a Codespace. Dependencies install automatically and port 8000 opens in the browser. Run the `uvicorn` command above.
 
@@ -117,7 +117,7 @@ The tests cover how realistic and deterministic the generated data is, that ever
 
 - The data is synthetic and event-level only. There is no video and no automatic event tagging from video.
 - Possession is measured by time between possession changes, a simplification of real possession models.
-- The free GitHub Models tier is rate-limited. The app spaces out its model calls and caches replies, and lower-priority moments may be dropped while the agents are busy.
+- Model calls are spaced out (`LLM_MIN_INTERVAL_S`) and cached, so with a slow or rate-limited provider some lower-priority moments may be dropped while the agents are busy.
 
 ## License
 

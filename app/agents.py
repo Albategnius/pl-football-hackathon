@@ -8,8 +8,8 @@ Workflow graph (one run per candidate moment):
 
 After a human producer approves a graphic, the FeedAdapter agent rewrites it for
 each output feed, and the StudioPackage agent builds half-time / full-time
-rundowns. Models are served by GitHub Models; responses are cached on disk so a
-seeded replay is reproducible and runs offline once recorded.
+rundowns. Models come from any OpenAI-compatible chat API; responses are cached
+on disk so a seeded replay is reproducible and runs offline once recorded.
 """
 
 from __future__ import annotations
@@ -41,19 +41,21 @@ Notify = Callable[[str, dict], Awaitable[None]]
 # --- model access ------------------------------------------------------------
 
 class ModelGateway:
-    """Creates agents on GitHub Models and caches every response by prompt."""
+    """Creates agents on any OpenAI-compatible chat API and caches every response by prompt."""
 
     def __init__(self) -> None:
-        self.token = os.getenv("GITHUB_TOKEN")
-        self.model = os.getenv("GITHUB_MODEL", "openai/gpt-4.1-mini")
-        self.endpoint = os.getenv("GITHUB_MODELS_ENDPOINT", "https://models.github.ai/inference")
-        self.min_interval = float(os.getenv("LLM_MIN_INTERVAL_S", "4.5"))
+        self.base_url = os.getenv("LLM_BASE_URL") or None
+        self.api_key = os.getenv("LLM_API_KEY") or None
+        self.model = os.getenv("LLM_MODEL", "gpt-4.1-mini")
+        self.min_interval = float(os.getenv("LLM_MIN_INTERVAL_S", "1.0"))
         self.use_cache = os.getenv("LLM_CACHE", "1") != "0"
         self.client = None
-        if self.token:
+        if self.api_key or self.base_url:
             from agent_framework.openai import OpenAIChatCompletionClient
 
-            self.client = OpenAIChatCompletionClient(model=self.model, base_url=self.endpoint, api_key=self.token)
+            # Local servers such as Ollama ignore the key, but the client requires one.
+            self.client = OpenAIChatCompletionClient(model=self.model, base_url=self.base_url,
+                                                     api_key=self.api_key or "not-needed")
         self._agents: dict[str, Agent] = {}
         self._instructions: dict[str, str] = {}
         self._lock = asyncio.Lock()
@@ -85,7 +87,7 @@ class ModelGateway:
                 return parsed, "cache"
         agent = self._agents.get(name)
         if agent is None:
-            return None, "fallback (no GITHUB_TOKEN)"
+            return None, "fallback (no model configured)"
         async with self._lock:
             wait = self.min_interval - (time.monotonic() - self._last_call)
             if wait > 0:
