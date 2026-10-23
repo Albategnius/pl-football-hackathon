@@ -4,6 +4,8 @@ An agent-assisted live graphics desk for football broadcasts. A team of AI agent
 
 Built for the Microsoft x Premier League **Inside the Game** developer hackathon. Category: **Best Multi-Agent System**.
 
+**Live demo (Azure Container Apps):** https://producer-copilot.politefield-ec1b9bf6.southeastasia.azurecontainerapps.io — no login or install needed. Press **Start match**.
+
 ![Producer Console](docs/console.png)
 
 ## The problem
