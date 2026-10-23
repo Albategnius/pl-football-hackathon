@@ -1,6 +1,6 @@
 # Producer Co-pilot
 
-An agent-assisted live graphics desk for football broadcasts. A team of AI agents watches a live (synthetic) match feed, proposes the right on-screen graphic at the right moment, explains why it matters now, and fact-checks every number before a human producer sees it. One approval puts the graphic on air in three feeds (main broadcast, casual streaming, club channel) as timed, machine-readable overlay cues.
+An agent-assisted live graphics desk for football broadcasts. A team of AI agents watches a live (synthetic) match feed, proposes the right on-screen graphic at the right moment, explains why it matters now, and fact-checks every number before a human producer sees it. One approval puts the graphic on air at once in three feeds (TV, fan app, club channel) as timed, machine-readable overlay cues, while a neural-voice commentator calls the match from the same verified data.
 
 Built for the Microsoft x Premier League **Inside the Game** developer hackathon. Category: **Best Multi-Agent System**.
 
@@ -20,7 +20,8 @@ A live graphics producer has a few seconds to decide what goes on screen. Under 
 | **Interpret** | A deterministic stats engine computes possession, pass length, accuracy and a 0-100 difficulty rating, shot speed and xG, sprint speed, a rolling momentum index, and a control-vs-chaos index. Every value keeps the IDs of the events it came from. |
 | **Explain** | The `StatsAnalyst` agent writes the "why now" for each moment: pressing, rhythm, game state, control vs chaos. |
 | **Render** | The `GraphicsProducer` agent fills one of five broadcast templates within strict character limits. Approved graphics appear in the on-air preview and on `GET /api/overlays` as timed cues (`t_in`, `t_out`, template, slots, source events). |
-| **Personalize** | The `FeedAdapter` agent rewrites each approved graphic for the main broadcast, a casual streaming audience, and a chosen club's channel. |
+| **Personalize** | The `FeedAdapter` agent rewrites each approved graphic for TV, a fan app for newcomers (plain words, no jargon) and a chosen club's own channel (first-person, partisan). Each version is fact-checked line by line and gets its own on-screen look. |
+| **Commentate** | Play-by-play and colour commentary built from the live events and computed stats, spoken by an Azure AI Speech neural voice whose style follows the moment: chat, excited, shouting for goals. |
 
 ## The agent team
 
@@ -46,28 +47,33 @@ The pipeline is a [Microsoft Agent Framework](https://github.com/microsoft/agent
 - **StatsAnalyst** (LLM agent) explains why the moment matters, using only the verified facts.
 - **GraphicsProducer** (LLM agent) picks a template and writes the slots.
 - **FactChecker** (deterministic executor) rejects any number that isn't in the facts and any slot over its character limit, then sends its reasons back to the `GraphicsProducer`. After 3 rejected drafts it substitutes a verified template, so the queue never stalls.
-- **FeedAdapter** (LLM agent) creates the three feed versions after approval. Each version is fact-checked again, and any feed that fails falls back to the approved wording.
+- **FeedAdapter** (LLM agent) creates the fan-app and club versions after approval, while the approved TV version is already on air. Each line is fact-checked; rejected lines go back to the agent once with the checker's reasons, and any line that still fails keeps the approved wording.
 - **StudioPackage** (LLM agent) builds a ranked half-time and full-time rundown plus a presenter script. The script's numbers are checked as well.
 
 The human producer stays in control. Edits made by hand are fact-checked too, and every proposal, edit, approval and rejection is written to the audit log.
+
+**Keeping pace with a live match:** approval airs the graphic immediately; three workers draft moments in parallel; moments that go stale before drafting, or wait too long for a decision, expire instead of reaching the producer late.
 
 **Failure handling:** model errors, rate limits and unparseable replies all fall back to deterministic, verified templates, and the console keeps running. **Fault injection** (a toggle in the header) deliberately corrupts one number in each first draft, so you can watch the `FactChecker` catch it and the `GraphicsProducer` repair it.
 
 ## Microsoft technology
 
 - **Microsoft Agent Framework (Python):** the agents, the workflow graph with its retry cycle, and the executors.
-- **Model access:** Agent Framework's OpenAI-compatible chat client, so any compatible provider works, Microsoft Foundry included. Switching providers only means changing `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`.
-- **Azure Container Apps:** hosts the public demo (`infra/deploy-azure.sh`); the model key is a Container Apps secret.
+- **Microsoft Foundry:** the live demo's agents run on a `gpt-5-mini` deployment (Global Standard) through Agent Framework's OpenAI-compatible chat client, with `reasoning_effort=low` for live-desk latency. Switching providers only means changing `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`.
+- **Azure AI Speech:** the commentator's neural voice (`en-US-DavisNeural`) with SSML speaking styles; usage is capped per minute and per day (`app/tts.py`).
+- **Azure Container Apps:** hosts the public demo (`infra/deploy-azure.sh`); model and speech keys are Container Apps secrets.
 - **GitHub Codespaces:** a one-click environment for judges (`.devcontainer/`).
 - **GitHub Copilot:** used while building the project.
 
 ## Using the console
 
-1. Press **Start match**. The synthetic game replays at 15× (switch to 30× or 60× in the top bar).
-2. The **Agent team** strip shows which agent is working on the current moment and whether the Fact Checker passed or rejected a draft.
-3. **Your decisions** lists graphics waiting for you, highest priority first. The top card is expanded: read *Why now*, check the verification line, then **Put on air** (`A`), **Edit**, or **Reject** (`R`). Cards never move while your pointer is over the list, so you always act on the card you see.
-4. Aired graphics appear on the **Program** monitor; switch between the **Main**, **Casual** and **Club** feeds to compare the three versions.
-5. Open the settings (gear icon) to turn on **Fault test** and watch the Fact Checker reject a wrong number and the Graphics Producer repair it.
+1. Press **Start match**. The synthetic game replays at 15× (5× feels closest to live and suits the commentator; 30× and 60× are for skimming). Stadium sound and the commentator start with the match; the speaker button mutes them.
+2. The **Program** monitor shows the pitch from a broadcast camera angle with shirt numbers and who has the ball (**Top view** switches to a tactical view). Lineups are under **Match stats**.
+3. The **Agent team** strip shows which agent is working and whether the Fact Checker passed or rejected a draft.
+4. **Your decisions** lists graphics waiting for you, highest priority first. Read *Why now*, check the verification line, then **✓ Approve** (`A`), **Edit**, or **Reject** (`R`). Cards never move while your pointer is over the list.
+5. Approved graphics air at once in the strip under the pitch, so the pitch stays clear. Switch **TV / Fan app / Club channel** to see each feed's look, and read all three texts side by side under **Feed versions**.
+6. At half-time the replay rests briefly behind a studio card with the first-half numbers; the half-time and full-time rundowns appear under **Studio package** (**Build rundown now** makes one at any moment).
+7. Open the settings (gear icon) to turn on **Fault test**, choose the club for the club channel, or switch the commentator voice off.
 
 Every visitor gets their own console (match, queue and audit log), so several judges can test the public demo at the same time without affecting each other.
 
@@ -91,9 +97,9 @@ Keyboard shortcuts: `a` approves and `r` rejects the highest-priority pending su
 
 ### Test instructions for judges
 
-1. Start the server as shown above and press **Start**. 15x speed plays a full match in about 6 minutes.
-2. Turn on **Fault injection**, then open a card's **Agent trace** to see a draft rejected and repaired.
-3. Press **Approve to air** on a card, then switch the on-air preview between **main**, **casual** and **club**.
+1. Open the live demo (or start the server as shown above) and press **Start match**. 15× plays a full match in about 6 minutes.
+2. Turn on **Fault test** in settings, then open a card's **How the agents got here** to see a draft rejected and repaired.
+3. Press **✓ Approve** on a card, then compare **TV**, **Fan app** and **Club channel** under **Feed versions**.
 4. Press **Edit** on a card and type a number that isn't in the facts. The Fact Checker blocks the edit.
 5. Open http://localhost:8000/api/overlays to see the machine-readable cue sheet, or `/api/audit` for the audit log.
 
@@ -108,7 +114,7 @@ LLM_BASE_URL=https://<resource>.openai.azure.com/openai/v1/ LLM_API_KEY=<key> LL
   bash infra/deploy-azure.sh                     # with a Microsoft Foundry model
 ```
 
-The API key is stored as a Container Apps secret, never in the image or the repository. The app runs on one replica because each visitor's console is kept in memory.
+For the neural commentator, add the Azure AI Speech (or Foundry AIServices) key as a secret and set `SPEECH_KEY=secretref:<secret>` and `SPEECH_REGION=<region>` on the container app. Keys are stored as Container Apps secrets, never in the image or the repository. The app runs on one replica because each visitor's console is kept in memory.
 
 ## Synthetic data
 
@@ -128,6 +134,8 @@ uv run python -m app.generator --seed 1    # writes data/match_1.json
 | POST | `/api/suggestions/{id}/approve` | Approve, optionally with edited `slots` (these are fact-checked) |
 | POST | `/api/suggestions/{id}/reject` | Reject with a reason |
 | GET | `/api/overlays?feed=main` | Timed overlay cues for a graphics engine |
+| POST | `/api/tts` | `{text, level}` → MP3 commentary line from Azure AI Speech (capped; 404 when not configured) |
+| GET | `/api/health` | Model and voice mode |
 | GET | `/api/audit` | Audit log |
 | POST | `/api/package` | Build a studio package on demand |
 
@@ -143,11 +151,12 @@ The tests cover how realistic and deterministic the generated data is, that ever
 
 - The data is synthetic and event-level only. There is no video and no automatic event tagging from video.
 - Possession is measured by time between possession changes, a simplification of real possession models.
-- Model calls are spaced out (`LLM_MIN_INTERVAL_S`) and cached, so with a slow or rate-limited provider some lower-priority moments may be dropped while the agents are busy.
+- At 30× and 60× the model cannot draft every moment in time; stale moments are dropped by design. 5× and 15× keep pace.
+- The commentator speaks from templates filled with live data (no model in the loop), so its wording repeats over a long match. Without Azure AI Speech configured it falls back to the browser's built-in voice.
 
 ## Credits
 
-Original concept, agents and simulation by Dimas Wahyu Saputro ([diwahsap](https://github.com/diwahsap)). Console redesign, per-visitor sessions and Azure deployment added by [Albategnius](https://github.com/Albategnius). Same team.
+Original concept, agents and simulation by Dimas Wahyu Saputro ([diwahsap](https://github.com/diwahsap)). Console redesign (3D broadcast camera, feed looks, half-time studio), per-visitor sessions, live pacing, neural-voice commentator, Microsoft Foundry and Azure deployment added by [Albategnius](https://github.com/Albategnius). Same team.
 
 ## License
 
