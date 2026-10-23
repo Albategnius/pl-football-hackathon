@@ -269,3 +269,79 @@ h3 { margin: 0; }
 .onair-strip .screen-gfx .gfx, .onair-strip .screen-gfx .gfx.player_tag, .onair-strip .screen-gfx .gfx.pass_card {
   position: static; width: auto; left: auto; right: auto; top: auto; bottom: auto; margin: 0; }
 .strip-empty { margin: 0; text-align: center; color: var(--ink-3); font-size: .86rem; }
+
+/* =====================================================================
+   Premium layer: stadium camera, glass panels, light and depth
+   ===================================================================== */
+body::before { content: ""; position: fixed; inset: -20%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40% 35% at 15% 10%, #2b4fff22, transparent 70%),
+    radial-gradient(35% 30% at 85% 0%, #ff475718, transparent 70%),
+    radial-gradient(45% 40% at 60% 100%, #2fd39a14, transparent 70%);
+  animation: aurora 24s ease-in-out infinite alternate; }
+@keyframes aurora { to { transform: translate3d(3%, 2%, 0) scale(1.06); } }
+
+.panel { background: linear-gradient(180deg, rgba(25, 35, 60, .82), rgba(15, 22, 40, .9));
+  border: 1px solid rgba(255, 255, 255, .07); backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 24px 48px -24px rgba(0, 0, 0, .7); }
+.topbar { background: linear-gradient(180deg, rgba(11, 16, 32, .92), rgba(11, 16, 32, .78)); border-bottom: 1px solid rgba(255, 255, 255, .06); }
+.scorebug { background: linear-gradient(180deg, #1f2a46, #131b30); border-color: rgba(255, 255, 255, .1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 10px 30px -10px rgba(0, 0, 0, .8); }
+.scorebug .sc { background: linear-gradient(180deg, #ffffff, #d9e2f2); box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .12); }
+.btn.primary { background: linear-gradient(180deg, #ffffff, #dbe4f5); box-shadow: inset 0 1px 0 #fff, 0 6px 18px -6px rgba(138, 180, 255, .6); }
+.btn.approve { background: linear-gradient(180deg, #4ee6b2, #22c48a); box-shadow: inset 0 1px 0 #ffffff55, 0 8px 20px -8px #2fd39aaa; }
+.tally-dot.live { animation: tally 1.6s ease-in-out infinite; }
+@keyframes tally { 50% { box-shadow: 0 0 0 7px #ff475722, 0 0 18px #ff4757aa; } }
+.card.pending.top { box-shadow: 0 0 0 1px #ffb54766, 0 0 32px -8px #ffb54766, 0 20px 40px -24px #000; }
+.pipeline li { background: linear-gradient(180deg, rgba(34, 46, 73, .7), rgba(25, 35, 58, .7)); border-color: rgba(255, 255, 255, .07); }
+.pipeline li.active { animation: agentGlow 1.4s ease-in-out infinite; }
+@keyframes agentGlow { 50% { box-shadow: 0 0 0 3px #8ab4ff33, 0 0 24px -4px #8ab4ff88; } }
+
+/* stadium + broadcast camera */
+.monitor { background: linear-gradient(180deg, #05070f 0%, #0a1222 30%, #0c1f15 62%, #0a2414 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06), inset 0 -40px 80px -40px #000; }
+.stadium { position: absolute; inset: 0; pointer-events: none; }
+.stand { position: absolute; left: -5%; right: -5%; top: 0; height: 42%;
+  background:
+    radial-gradient(circle at 2px 2px, rgba(255, 255, 255, .18) 0 1px, transparent 1.5px) 0 0 / 7px 6px,
+    radial-gradient(circle at 4px 4px, rgba(255, 71, 87, .22) 0 1px, transparent 1.5px) 0 0 / 11px 9px,
+    radial-gradient(circle at 3px 3px, rgba(27, 152, 224, .22) 0 1px, transparent 1.5px) 0 0 / 13px 10px,
+    linear-gradient(180deg, #0b1020 0%, #172238 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 35%, #000 80%, transparent 100%); opacity: .9; }
+.lights { position: absolute; inset: 0; }
+.lights span { position: absolute; top: -12%; width: 26%; height: 55%; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 252, 235, .35), rgba(255, 252, 235, .08) 55%, transparent);
+  filter: blur(6px); animation: flood 7s ease-in-out infinite alternate; }
+.lights span:nth-child(1) { left: -6%; } .lights span:nth-child(2) { left: 22%; animation-delay: -2s; }
+.lights span:nth-child(3) { left: 52%; animation-delay: -4s; } .lights span:nth-child(4) { left: 80%; animation-delay: -1s; }
+@keyframes flood { to { opacity: .7; } }
+.pitch-stage { position: absolute; left: 4%; right: 4%; top: 19%; bottom: 2%; perspective: 820px; perspective-origin: 50% -10%;
+  transition: all .6s cubic-bezier(.2, .8, .2, 1); }
+.pitch-stage .pitch { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible;
+  transform-origin: 50% 100%; transform: rotateX(38deg) scale(1.12, 1.25);
+  filter: drop-shadow(0 30px 30px rgba(0, 0, 0, .55)); transition: transform .6s cubic-bezier(.2, .8, .2, 1); }
+.monitor.view-2d .pitch-stage { left: 5%; right: 5%; top: 6%; bottom: 6%; }
+.monitor.view-2d .pitch-stage .pitch { transform: none; }
+.monitor.view-2d .stand, .monitor.view-2d .lights { opacity: .25; }
+.pitch .pulse { transform-box: fill-box; transform-origin: center; animation: pulse 1.4s ease-out infinite; }
+@keyframes pulse { from { transform: scale(.4); opacity: .9; } to { transform: scale(1.6); opacity: 0; } }
+.view-toggle { position: absolute; right: 3%; bottom: 4%; z-index: 2; border: 1px solid rgba(255, 255, 255, .18); border-radius: 999px;
+  background: rgba(8, 12, 22, .7); backdrop-filter: blur(6px); color: #fff; font-size: .78rem; font-weight: 700; padding: 6px 12px; cursor: pointer; }
+.view-toggle:hover { background: rgba(8, 12, 22, .9); }
+.screen-bug, .ball-now { z-index: 2; backdrop-filter: blur(6px); box-shadow: 0 8px 20px -8px #000; border: 1px solid rgba(255, 255, 255, .08); }
+
+/* on-air graphics: glossy broadcast finish */
+.gfx { box-shadow: 0 18px 40px -16px rgba(0, 0, 0, .8), 0 0 0 1px rgba(255, 255, 255, .06); }
+.gfx .hl { position: relative; overflow: hidden;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--teamc) 100%, #fff 18%), var(--teamc) 55%, color-mix(in srgb, var(--teamc) 100%, #000 22%)); }
+.gfx .bd { background: linear-gradient(180deg, rgba(14, 20, 36, .97), rgba(6, 9, 18, .97)); }
+.onair-strip.live .gfx .hl::after { content: ""; position: absolute; inset: 0; transform: translateX(-120%);
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .45) 50%, transparent 70%); animation: sheen 1.1s .15s ease-out forwards; }
+@keyframes sheen { to { transform: translateX(120%); } }
+.onair-strip { background: linear-gradient(180deg, rgba(5, 8, 16, .5), rgba(5, 8, 16, .25)); }
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, .lights span, .tally-dot.live, .pipeline li.active, .pitch .pulse, .onair-strip.live .gfx .hl::after { animation: none; }
+  .pitch-stage, .pitch-stage .pitch { transition: none; }
+}
+@media (max-width: 700px) { .pitch-stage { top: 26%; } .view-toggle { font-size: .7rem; padding: 4px 9px; } }

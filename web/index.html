@@ -70,8 +70,15 @@
           <h2 id="program-title">Program <span class="onair" id="onair" hidden>On air</span></h2>
           <div class="seg feed-switch" id="feed-tabs" role="tablist" aria-label="Output feed"></div>
         </div>
-        <div class="monitor" id="monitor">
-          <svg id="pitch" viewBox="-2 -2 109 72" class="pitch" role="img" aria-label="Last ten events on the pitch"></svg>
+        <div class="monitor view-3d" id="monitor">
+          <div class="stadium" aria-hidden="true">
+            <div class="stand"></div>
+            <div class="lights"><span></span><span></span><span></span><span></span></div>
+          </div>
+          <div class="pitch-stage">
+            <svg id="pitch" viewBox="-4 -4 113 76" class="pitch" role="img" aria-label="Last ten events on the pitch"></svg>
+          </div>
+          <button class="view-toggle" id="btn-view" type="button" aria-pressed="true" title="Switch between broadcast camera and top-down view">3D camera</button>
           <div class="screen-bug" id="screen-bug"></div>
           <div class="ball-now" id="ball-now" aria-live="off"></div>
         </div>

@@ -90,7 +90,18 @@ function renderStatus() {
 // --- pitch + stats --------------------------------------------------------------
 
 function pitchLines() {
-  return `<g fill="none" stroke="rgba(255,255,255,.55)" stroke-width=".45">
+  return `<defs>
+    <pattern id="mow" width="17.5" height="76" patternUnits="userSpaceOnUse" x="0">
+      <rect width="8.75" height="76" fill="#2c7a45"/><rect x="8.75" width="8.75" height="76" fill="#256b3c"/></pattern>
+    <radialGradient id="flood" cx="50%" cy="35%" r="75%"><stop offset="0" stop-color="#fff" stop-opacity=".16"/>
+      <stop offset=".6" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation=".8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="shade" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx=".25" dy=".55" stdDeviation=".35" flood-color="#000" flood-opacity=".55"/></filter>
+  </defs>
+  <rect x="-4" y="-4" width="113" height="76" rx="1.5" fill="url(#mow)"/>
+  <rect x="-4" y="-4" width="113" height="76" rx="1.5" fill="url(#flood)"/>
+  <g fill="none" stroke="rgba(255,255,255,.78)" stroke-width=".4">
     <rect x="0" y="0" width="105" height="68"/><line x1="52.5" y1="0" x2="52.5" y2="68"/>
     <circle cx="52.5" cy="34" r="9.15"/><rect x="0" y="13.84" width="16.5" height="40.32"/>
     <rect x="88.5" y="13.84" width="16.5" height="40.32"/><rect x="0" y="24.84" width="5.5" height="18.32"/>
@@ -101,14 +112,14 @@ function renderPitch() {
   const pts = S.events.filter((e) => e.x !== undefined).slice(-10);
   let marks = "";
   const token = (x, y, id, c, o, big) => {
-    const p = player(id), r = big ? 2.1 : 1.75;
-    return `<g opacity="${o}"><circle cx="${x}" cy="${y}" r="${r}" fill="${c}" stroke="#0b1020" stroke-width=".35"/>${p
-      ? `<text x="${x}" y="${y + 0.62}" text-anchor="middle" font-size="${p.number > 9 ? 1.65 : 1.85}" font-weight="800" fill="#fff">${p.number}</text>` : ""}</g>`;
+    const p = player(id), k = $("monitor").classList.contains("view-3d") ? 1.35 : 1, r = (big ? 2.1 : 1.75) * k;
+    return `<g opacity="${o}" filter="url(#shade)"><circle cx="${x}" cy="${y}" r="${r}" fill="${c}" stroke="#fff" stroke-opacity=".8" stroke-width=".3"/>${p
+      ? `<text x="${x}" y="${y + 0.62 * k}" text-anchor="middle" font-size="${(p.number > 9 ? 1.65 : 1.85) * k}" font-weight="800" fill="#fff">${p.number}</text>` : ""}</g>`;
   };
   pts.forEach((e, i) => {
     const c = team(e.team)?.color || "#fff", o = (0.25 + 0.75 * (i / Math.max(1, pts.length - 1))).toFixed(2);
     if (e.type === "pass" || e.type === "carry") {
-      marks += `<line x1="${e.x}" y1="${e.y}" x2="${e.end_x}" y2="${e.end_y}" stroke="${c}" stroke-width=".7" opacity="${o}" stroke-linecap="round" ${e.outcome === "incomplete" ? 'stroke-dasharray="1.5 1"' : ""}/>`;
+      marks += `<line x1="${e.x}" y1="${e.y}" x2="${e.end_x}" y2="${e.end_y}" stroke="${c}" stroke-width=".7" opacity="${o}" stroke-linecap="round" filter="url(#glow)" ${e.outcome === "incomplete" ? 'stroke-dasharray="1.5 1"' : ""}/>`;
     }
   });
   pts.forEach((e, i) => {
@@ -123,7 +134,8 @@ function renderPitch() {
     if (passed) marks += token(last.end_x, last.end_y, last.receiver_id, c, 1, false);
     const bx = last.end_x !== undefined && last.outcome !== "incomplete" ? last.end_x : last.x;
     const by = last.end_y !== undefined && last.outcome !== "incomplete" ? last.end_y : last.y;
-    marks += `<circle cx="${bx + 1.6}" cy="${by - 1.6}" r=".9" fill="#fff" stroke="#0b1020" stroke-width=".3"/>`;
+    marks += `<circle class="pulse" cx="${bx}" cy="${by}" r="2.4" fill="none" stroke="#fff" stroke-width=".3"/>`;
+    marks += `<circle cx="${bx + 1.6}" cy="${by - 1.6}" r=".95" fill="#fff" filter="url(#glow)"/>`;
     const verb = { pass: passed ? "→" : "pass lost", carry: "carries", shot: "shoots", goal: "scores", tackle: "tackles", foul: "fouls",
       possession_change: "wins the ball", kickoff: "kicks off", pressure: "presses" }[last.type] || "";
     now = `<span class="sw" style="background:${c}"></span><b>${shirt(last.player_id, last.player)}</b> ${esc(verb)}${passed ? ` <b>${shirt(last.receiver_id, last.receiver)}</b>` : ""}`;
@@ -484,6 +496,7 @@ document.addEventListener("click", async (ev) => {
   }
   if (b.id === "btn-play" || b.hasAttribute("data-start")) return startOrPause();
   if (b.id === "btn-sound") return toggleSound(!Sound.enabled);
+  if (b.id === "btn-view") return setView(!$("monitor").classList.contains("view-3d"));
   if (b.id === "btn-reset") { closeSettings(); return api("/api/control", { action: "reset" }); }
   if (b.id === "btn-package") return api("/api/package", { phase: "on_demand" });
   if (b.id === "btn-settings") {
@@ -554,6 +567,16 @@ $("faults").addEventListener("change", (e) => {
 });
 $("voice").addEventListener("change", (e) => { Sound.setVoice(e.target.checked); if (e.target.checked && !Sound.enabled) toggleSound(true); });
 $("club").addEventListener("change", (e) => api("/api/control", { club: e.target.value }));
+
+function setView(is3d) {
+  $("monitor").classList.toggle("view-3d", is3d);
+  $("monitor").classList.toggle("view-2d", !is3d);
+  $("btn-view").setAttribute("aria-pressed", String(is3d));
+  $("btn-view").textContent = is3d ? "3D camera" : "Top view";
+  try { localStorage.setItem("pc_view", is3d ? "3d" : "2d"); } catch (_) { /* storage blocked */ }
+  if (S.meta) renderPitch();
+}
+setView((() => { try { return localStorage.getItem("pc_view") !== "2d"; } catch (_) { return true; } })());
 
 renderSound();
 api("/api/state").then((st) => { loadFull(st); connect(); }).catch(() => toast("Could not reach the server. Refresh to try again.", true));
