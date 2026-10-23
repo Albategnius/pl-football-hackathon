@@ -259,3 +259,13 @@ h3 { margin: 0; }
   background: var(--teamc); color: #fff; font-variant-numeric: tabular-nums; }
 .btn.approve kbd { color: #05261A; border-color: #05261A66; }
 @media (max-width: 700px) { .lineups { grid-template-columns: 1fr; } .ball-now { font-size: .72rem; max-width: 55%; } }
+
+/* on-air graphics sit under the pitch, never on top of it */
+.onair-strip { margin-top: 10px; min-height: 112px; border: 1px dashed var(--line); border-radius: var(--radius); padding: 10px;
+  display: grid; align-items: center; background: #0b10204d; transition: border-color .2s; }
+.onair-strip.live { border: 1px solid #ff475788; box-shadow: 0 0 0 3px #ff475718; }
+.onair-strip .screen-gfx { position: static; inset: auto; pointer-events: auto; }
+.onair-strip .screen-gfx:empty { display: none; }
+.onair-strip .screen-gfx .gfx, .onair-strip .screen-gfx .gfx.player_tag, .onair-strip .screen-gfx .gfx.pass_card {
+  position: static; width: auto; left: auto; right: auto; top: auto; bottom: auto; margin: 0; }
+.strip-empty { margin: 0; text-align: center; color: var(--ink-3); font-size: .86rem; }

@@ -13,9 +13,9 @@ const AGENTS = [
   { id: "StatsAnalyst", role: "Explains why the moment matters right now", kind: "AI model" },
   { id: "GraphicsProducer", role: "Picks a template and writes the graphic", kind: "AI model" },
   { id: "FactChecker", role: "Checks every number and length; sends failures back", kind: "Code" },
-  { id: "FeedAdapter", role: "Rewrites the approved graphic for 3 feeds", kind: "AI model" },
+  { id: "FeedAdapter", role: "Rewrites the approved graphic for TV, the fan app and the club channel", kind: "AI model" },
 ];
-const FEED_LABEL = { main: "Main", casual: "Casual", club: "Club" };
+const FEED_LABEL = { main: "TV", casual: "Fan app", club: "Club channel" };
 
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -215,9 +215,11 @@ function gfxHTML(tpl, slots, data) {
 
 function showOnAir(ov) {
   $("screen-gfx").innerHTML = gfxHTML(ov.template, ov.slots, ov.data);
-  $("onair").hidden = false;
+  $("onair").hidden = false; $("strip-empty").hidden = true; $("onair-strip").classList.add("live");
   clearTimeout(S.screenTimer);
-  S.screenTimer = setTimeout(() => { $("screen-gfx").innerHTML = ""; $("onair").hidden = true; }, ov.duration_s * 1000);
+  S.screenTimer = setTimeout(() => {
+    $("screen-gfx").innerHTML = ""; $("onair").hidden = true; $("strip-empty").hidden = false; $("onair-strip").classList.remove("live");
+  }, ov.duration_s * 1000);
 }
 
 function renderFeedTabs() {
@@ -394,7 +396,7 @@ function loadFull(state) {
   S.players = new Map(state.meta.teams.flatMap((t) => t.players.map((p) => [p.id, p])));
   S.suggestions = new Map(state.suggestions.map((s) => [s.id, s]));
   S.editing.clear(); S.expanded.clear(); S.agentState = {};
-  $("ticker").innerHTML = ""; $("audit").innerHTML = ""; $("screen-gfx").innerHTML = ""; $("onair").hidden = true;
+  $("ticker").innerHTML = ""; $("audit").innerHTML = ""; $("screen-gfx").innerHTML = ""; $("onair").hidden = true; $("strip-empty").hidden = false; $("onair-strip").classList.remove("live");
   $("club").innerHTML = state.meta.teams.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
   state.audit.forEach(addAudit);
   state.recent_events.forEach(addTicker);
