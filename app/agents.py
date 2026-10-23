@@ -397,25 +397,45 @@ async def adapt_feeds(gw: ModelGateway, c: Candidate, graphic: dict, club: str) 
     prompt = (f"Approved graphic (template {tpl}, slot limits {json.dumps(limits)}):\n{json.dumps(graphic['slots'])}\n"
               f"Facts: {json.dumps(c.facts)}\nChosen club for the club feed: {club}\nFeeds:\n{feeds_desc}")
     result, source = await gw.ask_json(FEED_ADAPTER, prompt)
+    original = graphic["slots"]
+
+    def evaluate(slots: dict) -> tuple[dict, list[str], dict[str, str]]:
+        """Merge a feed's proposal slot by slot; return (slots, rewritten keys, {blocked key: reason})."""
+        merged = {k: str(slots.get(k, "")).strip() or v for k, v in original.items()}
+        issues = check_graphic({"template": tpl, "slots": merged}, c.facts)
+        blocked = {k: next(i for i in issues if f"'{k}'" in i) for k in merged if any(f"'{k}'" in i for i in issues)}
+        for k in blocked:
+            merged[k] = original[k]
+        rewritten = [k for k in merged if k not in blocked and merged[k] != original[k]]
+        return merged, rewritten, blocked
+
+    proposals = {f: (result or {}).get(f) for f in FEEDS}
+    done = {f: evaluate(v) for f, v in proposals.items() if isinstance(v, dict)}
+
+    # One repair round, like the drafting loop: the Fact Checker's notes go back to the FeedAdapter.
+    notes = [f"{f}.{k}: {why}" for f, (_, _, blocked) in done.items() if f != "main" for k, why in blocked.items()]
+    if notes:
+        repair = (prompt + f"\nYour previous versions: {json.dumps({f: proposals[f] for f in done})}\n"
+                  "The Fact Checker rejected these lines:\n" + "\n".join(notes) +
+                  "\nRewrite only those lines, keeping each feed's voice. Same JSON shape with all three feeds.")
+        fixed, src2 = await gw.ask_json(FEED_ADAPTER, repair)
+        for f, (merged, rewritten, blocked) in list(done.items()):
+            again = (fixed or {}).get(f)
+            if f == "main" or not blocked or not isinstance(again, dict):
+                continue
+            retry = {**merged, **{k: again.get(k, "") for k in blocked}}
+            m2, r2, b2 = evaluate(retry)
+            if len(b2) < len(blocked):
+                done[f] = (m2, r2, b2)
+
     feeds: dict[str, dict] = {}
     for feed in FEEDS:
-        slots = (result or {}).get(feed)
-        if not isinstance(slots, dict):
-            feeds[feed] = {"slots": dict(graphic["slots"]), "source": f"approved graphic ({source})", "rewritten": []}
+        if feed not in done:
+            feeds[feed] = {"slots": dict(original), "source": f"approved graphic ({source})", "rewritten": []}
             continue
-        # Check slot by slot: keep every rewritten slot that passes, fall back only where one fails.
-        merged = {k: str(slots.get(k, "")).strip() or v for k, v in graphic["slots"].items()}
-        issues = check_graphic({"template": tpl, "slots": merged}, c.facts)
-        rewritten = []
-        for k in merged:
-            if any(f"'{k}'" in i for i in issues):
-                merged[k] = graphic["slots"][k]
-            elif merged[k] != graphic["slots"][k]:
-                rewritten.append(k)
-        if check_graphic({"template": tpl, "slots": merged}, c.facts):  # combined slots still fail: play it safe
-            merged, rewritten = dict(graphic["slots"]), []
+        merged, rewritten, blocked = done[feed]
         feeds[feed] = {"slots": merged, "source": source if rewritten else "approved graphic", "rewritten": rewritten,
-                       "blocked": [k for k in graphic["slots"] if any(f"'{k}'" in i for i in issues)]}
+                       "blocked": list(blocked)}
     return feeds, source
 
 
