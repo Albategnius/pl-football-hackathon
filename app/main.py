@@ -167,10 +167,11 @@ class Session:
             if sug["status"] != "pending" or not c:
                 continue
             limit = STALE_GOAL_S if c.kind == "goal" else STALE_S
-            age = self.state.t - c.t
+            # Count from when the idea reached the producer, so slow model replies don't eat their window.
+            age = self.state.t - max(c.t, sug.get("proposed_at_t") or c.t)
             if age > limit:
                 sug["status"] = "dropped"
-                sug["dropped_reason"] = f"expired: the moment is {int(age // 60)} minutes old"
+                sug["dropped_reason"] = f"expired: waited {int(age // 60)} match minutes without a decision"
                 self.log("expired", sid, sug["dropped_reason"], actor="agents")
                 await self.broadcast("suggestion", sug)
                 await self.broadcast("audit", self.audit[-1])

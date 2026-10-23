@@ -49,6 +49,9 @@ class ModelGateway:
         self.model = os.getenv("LLM_MODEL", "gpt-4.1-mini")
         self.min_interval = float(os.getenv("LLM_MIN_INTERVAL_S", "1.0"))
         self.use_cache = os.getenv("LLM_CACHE", "1") != "0"
+        # GPT-5 family: "minimal" / "low" keeps replies fast enough for a live desk. Unset for other models.
+        effort = os.getenv("LLM_REASONING_EFFORT", "").strip()
+        self.default_options = {"reasoning_effort": effort} if effort else None
         self.client = None
         if self.api_key or self.base_url:
             from agent_framework.openai import OpenAIChatCompletionClient
@@ -73,7 +76,8 @@ class ModelGateway:
     def register(self, name: str, instructions: str) -> None:
         self._instructions[name] = instructions
         if self.client:
-            self._agents[name] = Agent(client=self.client, name=name, instructions=instructions)
+            self._agents[name] = Agent(client=self.client, name=name, instructions=instructions,
+                                       default_options=self.default_options)
 
     def _key(self, name: str, prompt: str) -> str:
         return hashlib.sha256(f"{self.model}\n{name}\n{self._instructions[name]}\n{prompt}".encode()).hexdigest()[:24]
