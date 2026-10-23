@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 from collections import OrderedDict, deque
 from xml.sax.saxutils import escape
@@ -25,7 +26,7 @@ DAILY_CHARS = int(os.getenv("TTS_DAILY_CHARS", "150000"))
 STYLES = {
     0: ("chat", 1.0, "+4%", "+0%"),        # colour commentary
     1: ("excited", 0.9, "+10%", "+2%"),    # play-by-play
-    2: ("excited", 1.8, "+16%", "+8%"),    # big chance
+    2: ("excited", 2.0, "+18%", "+10%"),   # big chance
     3: ("shouting", 2.0, "+14%", "+14%"),  # goal
 }
 
@@ -38,13 +39,23 @@ def enabled() -> bool:
     return bool(KEY and REGION)
 
 
+def _body(text: str, level: int) -> str:
+    _, _, rate, pitch = STYLES.get(level, STYLES[1])
+    if level == 3 and text.upper().startswith(("GOAL", "IT'S IN", "GOOO")):
+        # The goal call: three rising "GOAL!"s, a breath, then the scorer and score at full tilt.
+        rest = re.sub(r"^(?:\s*(?:GO+A+L|It's in)!)+\s*", "", text, flags=re.I)
+        calls = "".join(f'<prosody rate="{r}" pitch="{p}" volume="x-loud">GOAL!</prosody><break time="120ms"/>'
+                        for r, p in (("-5%", "+12%"), ("-10%", "+22%"), ("-20%", "+32%")))
+        return f'{calls}<break time="250ms"/><prosody rate="+18%" pitch="+16%" volume="x-loud">{escape(rest)}</prosody>'
+    return f'<prosody rate="{rate}" pitch="{pitch}">{escape(text)}</prosody>'
+
+
 def _ssml(text: str, level: int) -> str:
-    style, degree, rate, pitch = STYLES.get(level, STYLES[1])
+    style, degree, _, _ = STYLES.get(level, STYLES[1])
     return ('<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
             'xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">'
             f'<voice name="{VOICE}"><mstts:express-as style="{style}" styledegree="{degree}">'
-            f'<prosody rate="{rate}" pitch="{pitch}">{escape(text)}</prosody>'
-            '</mstts:express-as></voice></speak>')
+            f'{_body(text, level)}</mstts:express-as></voice></speak>')
 
 
 class TTSLimit(Exception):
