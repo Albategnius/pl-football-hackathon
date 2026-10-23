@@ -153,7 +153,8 @@ const Sound = (() => {
     window.speechSynthesis.speak(u);
   }
 
-  function setRunning(isRunning) {
+  function setRunning(isRunning, finished = false) {
+    if (running && !isRunning && !finished) stopVoice();  // pause silences the commentator; the full-time call plays out
     running = isRunning;
     if (enabled) level(isRunning ? BASE : 0, isRunning ? 2 : 0.8);
   }

@@ -101,7 +101,7 @@ function renderStatus() {
   $("play-ico").setAttribute("d", st.running ? "M7 5h4v14H7zM13 5h4v14h-4z" : "M8 5v14l11-7z");
   $("btn-play").disabled = st.finished;
   document.querySelector(".tally-dot").classList.toggle("live", st.running);
-  Sound.setRunning(st.running);
+  Sound.setRunning(st.running, st.finished);
 }
 
 // --- pitch + stats --------------------------------------------------------------

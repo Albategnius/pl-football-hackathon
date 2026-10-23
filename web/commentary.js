@@ -14,6 +14,7 @@ const Commentary = (() => {
 
   function say(text, prio) {
     if (!Sound.enabled || !Sound.voice || !text) return;
+    if (!ctx.running() && prio < P.GOAL) return;  // nothing new while paused (full-time call still plays)
     const busy = Sound.isSpeaking();
     // Play-by-play never talks over the commentator; big moments cut in like a real broadcast.
     if (busy && prio < P.BIG) return;
