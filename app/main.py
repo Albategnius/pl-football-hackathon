@@ -71,6 +71,7 @@ class Session:
         self.detector = MomentDetector(self.state)
         self.idx = 0
         self.running = False
+        self.on_break = False
         self.club = self.meta["home"]
         self.suggestions: dict[str, dict] = {}
         self.candidates: dict[str, Candidate] = {}
@@ -130,6 +131,17 @@ class Session:
                 await self.broadcast("stats", self.state.snapshot())
             if ev["type"] in ("half_end", "full_time"):
                 asyncio.create_task(self.make_package("half_time" if ev["type"] == "half_end" else "full_time"))
+            if ev["type"] == "half_end":
+                # A real half-time break: the replay rests while the studio shows the first-half picture.
+                self.on_break = True
+                await self.broadcast("status", self.status())
+                waited = 0.0
+                while waited < HALFTIME_S:
+                    await asyncio.sleep(0.25)
+                    if self.running:
+                        waited += 0.25
+                self.on_break = False
+                await self.broadcast("status", self.status())
         self.running = False
         await self.broadcast("status", self.status())
 
@@ -253,7 +265,7 @@ class Session:
         return {"running": self.running, "speed": self.speed, "inject_faults": self.inject_faults,
                 "club": self.club, "mode": self.gw.mode, "seed": self.seed,
                 "progress": self.idx / max(1, len(self.match["events"])),
-                "finished": self.idx >= len(self.match["events"])}
+                "finished": self.idx >= len(self.match["events"]), "half_time_break": self.on_break}
 
     def full_state(self) -> dict:
         return {"meta": self.meta, "status": self.status(), "stats": self.state.snapshot(),
@@ -271,6 +283,7 @@ GATEWAY = build_gateway()
 SEED = int(os.getenv("MATCH_SEED", "1"))
 MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "40"))
 IDLE_SECONDS = int(os.getenv("SESSION_IDLE_S", "1800"))
+HALFTIME_S = float(os.getenv("HALFTIME_BREAK_S", "8"))  # real seconds of half-time break
 STALE_S = int(os.getenv("STALE_MATCH_S", "360"))            # 6 match minutes for most moments
 STALE_GOAL_S = int(os.getenv("STALE_GOAL_MATCH_S", "600"))  # 10 for goals
 SESSIONS: dict[str, Session] = {}

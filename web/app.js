@@ -59,7 +59,8 @@ function toast(text, warn = false) {
 function renderScorebug() {
   if (!S.meta || !S.stats) return;
   const h = team(S.meta.home), a = team(S.meta.away), sc = S.stats.score;
-  const clk = S.stats.finished ? "FT" : S.started || S.stats.t > 0 ? clock(S.stats.t) : "KO";
+  const onBreak = !!S.status?.half_time_break;
+  const clk = S.stats.finished ? "FT" : onBreak ? "HT" : S.started || S.stats.t > 0 ? `${S.stats.period === 2 ? "2H" : "1H"} ${clock(S.stats.t)}` : "KO";
   $("scorebug").innerHTML = `
     <span class="sw" style="background:${h.color}"></span><span class="t">${esc(h.short)}</span>
     <span class="sc">${sc[h.id]}–${sc[a.id]}</span>
@@ -67,6 +68,22 @@ function renderScorebug() {
     <span class="clk">${clk}</span>`;
   $("screen-bug").textContent = `${h.id} ${sc[h.id]}-${sc[a.id]} ${a.id}  ${clk}`;
   $("timeline-fill").style.width = `${Math.min(100, (S.stats.t / (94 * 60)) * 100)}%`;
+}
+
+// Half-time and full-time cards over the pitch, like the studio break.
+function renderBreak() {
+  if (!S.meta || !S.stats) return;
+  const fin = S.stats.finished, ht = !!S.status?.half_time_break;
+  const el = $("break-card");
+  if (!fin && !ht) { el.hidden = true; return; }
+  const h = team(S.meta.home), a = team(S.meta.away), sc = S.stats.score, th = S.stats.totals[h.id], ta = S.stats.totals[a.id];
+  const row = (label, x, y) => `<div class="br-row"><b>${x}</b><span>${label}</span><b>${y}</b></div>`;
+  el.innerHTML = `<div class="br-kicker">${fin ? "Full-time" : "Half-time"}</div>
+    <div class="br-score"><span>${esc(h.short)}</span><strong>${sc[h.id]}–${sc[a.id]}</strong><span>${esc(a.short)}</span></div>
+    ${row("Possession %", Math.round(th.possession_pct), Math.round(ta.possession_pct))}
+    ${row("Shots", th.shots, ta.shots)}${row("xG (simulated)", th.xg, ta.xg)}${row("Pass accuracy %", Math.round(th.pass_accuracy_pct), Math.round(ta.pass_accuracy_pct))}
+    <div class="br-foot">${fin ? "The studio rundown is in the Studio package tab." : "Second half starts shortly. The half-time rundown is in the Studio package tab."}</div>`;
+  el.hidden = false;
 }
 
 function renderStatus() {
@@ -210,7 +227,7 @@ function gfxHTML(tpl, slots, data) {
         <div class="bd"><div class="kv"><span>${s.stat_label}</span><span class="big">${s.stat_value}</span></div>${s.context}</div></div>`;
     case "pass_card":
       return `<div class="gfx pass_card" ${style}><div class="hl">${s.player}</div>
-        <div class="bd"><div class="kv"><span>Distance <b class="big">${s.distance}</b></span><span>Difficulty <b class="big">${s.difficulty}</b></span></div>${s.caption}</div></div>`;
+        <div class="bd"><div class="kv"><span>Distance <b class="big">${s.distance}</b></span><span title="Pass difficulty, 0-100, computed in code: up to 40 for length, 25 if under pressure, 15 for forward progress, up to 20 for reaching the final third or the box">Difficulty <b class="big">${s.difficulty}</b></span></div>${s.caption}</div></div>`;
     case "momentum_bar": {
       const m = data?.momentum ?? 0, left = 50 + m / 2;
       return `<div class="gfx momentum_bar" ${style}><div class="hl">${s.headline}</div><div class="bd">
@@ -424,7 +441,7 @@ function loadFull(state) {
   state.audit.forEach(addAudit);
   state.recent_events.forEach(addTicker);
   if (state.packages.length) renderPackage(state.packages[state.packages.length - 1]);
-  renderLineups(); renderFeedTabs(); renderScorebug(); renderStats(); renderPitch(); renderStatus(); renderPipeline(); renderQueue();
+  renderLineups(); renderFeedTabs(); renderBreak(); renderScorebug(); renderStats(); renderPitch(); renderStatus(); renderPipeline(); renderQueue();
 }
 
 function connect() {
@@ -437,7 +454,7 @@ function connect() {
     soundFor(e);
     Commentary.onEvent(e);
   });
-  on("stats", (st) => { S.stats = st; renderScorebug(); renderStats(); });
+  on("stats", (st) => { S.stats = st; renderScorebug(); renderStats(); renderBreak(); });
   on("suggestion", upsert);
   on("trace", (t) => { const s = S.suggestions.get(t.id); if (s) { s.trace = [...(s.trace || []), t]; } onTrace(t); renderQueue(); });
   on("overlays", (ovs) => {
@@ -447,7 +464,11 @@ function connect() {
   });
   on("audit", addAudit);
   on("package", (p) => { renderPackage(p); toast(`Studio rundown ready (${p.phase.replace(/_/g, " ")})`); });
-  on("status", (st) => { S.status = st; renderStatus(); });
+  on("status", (st) => {
+    const wasBreak = !!S.status?.half_time_break;
+    S.status = st; renderStatus(); renderScorebug(); renderBreak();
+    if (wasBreak && !st.half_time_break) toast("Second half under way");
+  });
   on("reset", loadFull);
   es.onerror = () => { es.close(); setTimeout(async () => { loadFull(await api("/api/state")); connect(); }, 1500); };
 }
