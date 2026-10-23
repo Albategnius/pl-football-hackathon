@@ -55,8 +55,19 @@ The human producer stays in control. Edits made by hand are fact-checked too, an
 
 - **Microsoft Agent Framework (Python):** the agents, the workflow graph with its retry cycle, and the executors.
 - **Model access:** Agent Framework's OpenAI-compatible chat client, so any compatible provider works, Microsoft Foundry included. Switching providers only means changing `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`.
+- **Azure Container Apps:** hosts the public demo (`infra/deploy-azure.sh`); the model key is a Container Apps secret.
 - **GitHub Codespaces:** a one-click environment for judges (`.devcontainer/`).
 - **GitHub Copilot:** used while building the project.
+
+## Using the console
+
+1. Press **Start match**. The synthetic game replays at 15× (switch to 30× or 60× in the top bar).
+2. The **Agent team** strip shows which agent is working on the current moment and whether the Fact Checker passed or rejected a draft.
+3. **Your decisions** lists graphics waiting for you, highest priority first. The top card is expanded: read *Why now*, check the verification line, then **Put on air** (`A`), **Edit**, or **Reject** (`R`). Cards never move while your pointer is over the list, so you always act on the card you see.
+4. Aired graphics appear on the **Program** monitor; switch between the **Main**, **Casual** and **Club** feeds to compare the three versions.
+5. Open the settings (gear icon) to turn on **Fault test** and watch the Fact Checker reject a wrong number and the Graphics Producer repair it.
+
+Every visitor gets their own console (match, queue and audit log), so several judges can test the public demo at the same time without affecting each other.
 
 ## Run it
 
@@ -83,6 +94,19 @@ Keyboard shortcuts: `a` approves and `r` rejects the highest-priority pending su
 3. Press **Approve to air** on a card, then switch the on-air preview between **main**, **casual** and **club**.
 4. Press **Edit** on a card and type a number that isn't in the facts. The Fact Checker blocks the edit.
 5. Open http://localhost:8000/api/overlays to see the machine-readable cue sheet, or `/api/audit` for the audit log.
+
+## Deploy to Azure Container Apps
+
+From Azure Cloud Shell (no local Docker needed):
+
+```bash
+git clone <this repo> && cd pl-football-hackathon
+bash infra/deploy-azure.sh                       # deterministic templates only
+LLM_BASE_URL=https://<resource>.openai.azure.com/openai/v1/ LLM_API_KEY=<key> LLM_MODEL=<deployment> \
+  bash infra/deploy-azure.sh                     # with a Microsoft Foundry model
+```
+
+The API key is stored as a Container Apps secret, never in the image or the repository. The app runs on one replica because each visitor's console is kept in memory.
 
 ## Synthetic data
 
@@ -118,6 +142,10 @@ The tests cover how realistic and deterministic the generated data is, that ever
 - The data is synthetic and event-level only. There is no video and no automatic event tagging from video.
 - Possession is measured by time between possession changes, a simplification of real possession models.
 - Model calls are spaced out (`LLM_MIN_INTERVAL_S`) and cached, so with a slow or rate-limited provider some lower-priority moments may be dropped while the agents are busy.
+
+## Credits
+
+Original concept, agents and simulation by Dimas Wahyu Saputro ([diwahsap](https://github.com/diwahsap)). Console redesign, per-visitor sessions and Azure deployment added by [Albategnius](https://github.com/Albategnius). Same team.
 
 ## License
 

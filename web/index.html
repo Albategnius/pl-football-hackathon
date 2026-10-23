@@ -3,87 +3,127 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Producer Co-pilot - live graphics desk</title>
+  <title>Producer Co-pilot</title>
+  <meta name="description" content="An AI agent team proposes fact-checked broadcast graphics from a live synthetic football match. You decide what goes on air.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  <a class="skip" href="#queue-panel">Skip to the decision queue</a>
+
   <header class="topbar">
     <div class="brand">
-      <span class="logo">PC</span>
+      <span class="tally-dot" aria-hidden="true"></span>
       <div>
         <div class="brand-name">Producer Co-pilot</div>
-        <div class="brand-sub">Agent-assisted live graphics desk</div>
+        <div class="brand-sub">AI agents propose. You decide what goes on air.</div>
       </div>
     </div>
-    <div class="scorebug" id="scorebug"></div>
-    <div class="controls">
-      <button id="btn-start" class="btn primary">Start</button>
-      <button id="btn-pause" class="btn">Pause</button>
-      <button id="btn-reset" class="btn">Reset</button>
-      <label class="ctl">Speed
-        <select id="speed">
-          <option value="5">5x</option>
-          <option value="10">10x</option>
-          <option value="15">15x</option>
-          <option value="30">30x</option>
-          <option value="60">60x</option>
-          <option value="120">120x</option>
-        </select>
-      </label>
-      <label class="ctl">Club feed
-        <select id="club"></select>
-      </label>
-      <label class="ctl toggle" title="Corrupts one number in each first draft so you can watch the Fact Checker reject it">
-        <input type="checkbox" id="faults"> Fault injection
-      </label>
-      <span class="badge" id="mode"></span>
+
+    <div class="scorebug" id="scorebug" aria-live="polite"></div>
+
+    <div class="transport">
+      <button id="btn-play" class="btn primary" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path id="play-ico" d="M8 5v14l11-7z"/></svg>
+        <span id="play-label">Start match</span>
+      </button>
+      <div class="seg" role="group" aria-label="Replay speed">
+        <button type="button" data-speed="15">15×</button>
+        <button type="button" data-speed="30">30×</button>
+        <button type="button" data-speed="60">60×</button>
+      </div>
+      <button id="btn-settings" class="btn icon" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settings" title="Settings">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.4 4.6-.1-2.2 2-1.6-2-3.4-2.4.8a8 8 0 0 0-1.9-1.1L15.5 3h-4L11 5.6a8 8 0 0 0-1.9 1.1l-2.4-.8-2 3.4 2 1.6-.1 2.2-2 1.6 2 3.4 2.4-.8c.6.5 1.2.8 1.9 1.1l.5 2.6h4l.5-2.6a8 8 0 0 0 1.9-1.1l2.4.8 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+      <div class="popover" id="settings" hidden>
+        <label class="field">Club channel follows
+          <select id="club"></select>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="faults">
+          <span class="track" aria-hidden="true"></span>
+          <span>Fault test <small>Corrupts one number in every first draft so you can watch the Fact Checker catch it.</small></span>
+        </label>
+        <button id="btn-reset" class="btn ghost" type="button">Restart match</button>
+        <p class="model" id="model-badge"></p>
+      </div>
     </div>
   </header>
 
-  <main class="grid">
-    <section class="col left">
-      <div class="panel">
-        <h2>Live feed</h2>
-        <svg id="pitch" viewBox="-2 -2 109 72" class="pitch"></svg>
-        <div id="momentum" class="momentum"></div>
-        <div id="statbars" class="statbars"></div>
-      </div>
-      <div class="panel grow">
-        <h2>Event ticker</h2>
-        <ol id="ticker" class="ticker"></ol>
-      </div>
-    </section>
+  <div class="timeline" id="timeline" aria-hidden="true"><div class="fill" id="timeline-fill"></div></div>
 
-    <section class="col center">
-      <div class="panel grow">
-        <h2>Suggestion queue <span class="hint">agents propose, you decide</span></h2>
-        <div id="queue" class="queue"></div>
-      </div>
-    </section>
-
-    <section class="col right">
-      <div class="panel">
-        <h2>On-air preview</h2>
-        <div class="feed-tabs" id="feed-tabs"></div>
-        <div class="screen" id="screen">
+  <main class="layout">
+    <section class="program" aria-labelledby="program-title">
+      <div class="panel monitor-panel">
+        <div class="panel-head">
+          <h2 id="program-title">Program <span class="onair" id="onair" hidden>On air</span></h2>
+          <div class="seg feed-switch" id="feed-tabs" role="tablist" aria-label="Output feed"></div>
+        </div>
+        <div class="monitor" id="monitor">
+          <svg id="pitch" viewBox="-2 -2 109 72" class="pitch" role="img" aria-label="Last ten events on the pitch"></svg>
           <div class="screen-bug" id="screen-bug"></div>
           <div class="screen-gfx" id="screen-gfx"></div>
         </div>
-        <details class="cue">
-          <summary>Last overlay cue (JSON for the graphics engine)</summary>
-          <pre id="cue-json">No cues yet.</pre>
+        <p class="feed-desc" id="feed-desc"></p>
+      </div>
+
+      <div class="panel agents-panel">
+        <div class="panel-head">
+          <h2>Agent team</h2>
+          <span class="muted small" id="agents-status">Waiting for the first moment</span>
+        </div>
+        <ol class="pipeline" id="pipeline"></ol>
+      </div>
+
+      <div class="panel tabs-panel">
+        <div class="tabs" role="tablist" aria-label="Match details">
+          <button role="tab" type="button" aria-selected="true" data-tab="stats">Match stats</button>
+          <button role="tab" type="button" aria-selected="false" data-tab="events">Event log</button>
+          <button role="tab" type="button" aria-selected="false" data-tab="package">Studio package</button>
+          <button role="tab" type="button" aria-selected="false" data-tab="audit">Audit log</button>
+        </div>
+        <div class="tab" data-pane="stats">
+          <div class="momentum" id="momentum"></div>
+          <div class="statgrid" id="statbars"></div>
+          <p class="muted small">All figures are computed in code from synthetic events. xG and speeds are values of the synthetic simulation, not real tracking data.</p>
+        </div>
+        <div class="tab" data-pane="events" hidden><ol class="ticker" id="ticker"></ol></div>
+        <div class="tab" data-pane="package" hidden>
+          <div class="package" id="package"><p class="muted">A half-time and full-time rundown with a presenter script is built automatically.</p></div>
+          <button id="btn-package" class="btn ghost" type="button">Build rundown now</button>
+        </div>
+        <div class="tab" data-pane="audit" hidden><ol class="audit" id="audit"></ol></div>
+      </div>
+    </section>
+
+    <section class="decisions" id="queue-panel" aria-labelledby="queue-title">
+      <div class="panel queue-panel">
+        <div class="panel-head">
+          <h2 id="queue-title">Your decisions <span class="count" id="pending-count">0</span></h2>
+          <span class="muted small kb-hint"><kbd>A</kbd> approve · <kbd>R</kbd> reject</span>
+        </div>
+        <div id="welcome" class="welcome">
+          <h3>Run the graphics desk for a live match</h3>
+          <ol class="steps">
+            <li><b>Start the match.</b> A synthetic game replays at 15× speed.</li>
+            <li><b>Agents watch and propose.</b> They pick the moment, write the graphic and fact-check every number.</li>
+            <li><b>You decide.</b> Approve to put it on air in three feeds, edit it, or reject it.</li>
+          </ol>
+          <button class="btn primary big" type="button" data-start>Start match</button>
+          <p class="muted small">Fictional teams and players. Not official Premier League data.</p>
+        </div>
+        <div id="queue" class="queue"></div>
+        <details class="history" id="history-wrap">
+          <summary>Decided <span id="history-count">0</span></summary>
+          <div id="history" class="history-list"></div>
         </details>
-      </div>
-      <div class="panel">
-        <h2>Studio package <button id="btn-package" class="btn small">Build now</button></h2>
-        <div id="package" class="package muted">Built automatically at half-time and full-time.</div>
-      </div>
-      <div class="panel grow">
-        <h2>Audit log</h2>
-        <ol id="audit" class="audit"></ol>
       </div>
     </section>
   </main>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

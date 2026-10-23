@@ -6,11 +6,13 @@ import asyncio
 import itertools
 import json
 import os
+import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -42,9 +44,10 @@ def now_iso() -> str:
 
 
 class Session:
-    def __init__(self, seed: int):
+    def __init__(self, seed: int, gw=None):
         self.seed = seed
-        self.gw = build_gateway()
+        self.gw = gw or build_gateway()
+        self.last_seen = time.monotonic()
         self.clients: set[asyncio.Queue] = set()
         self.speed = float(os.getenv("REPLAY_SPEED", "15"))
         self.inject_faults = os.getenv("INJECT_FAULTS", "0") == "1"
@@ -240,8 +243,41 @@ class Session:
 
 
 app = FastAPI(title="Producer Co-pilot")
-session = Session(int(os.getenv("MATCH_SEED", "1")))
 app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+# One console per visitor, so judges testing the public demo at the same time never reset each
+# other's match. The model gateway (rate limiter + reply cache) is shared by all sessions.
+GATEWAY = build_gateway()
+SEED = int(os.getenv("MATCH_SEED", "1"))
+MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "40"))
+IDLE_SECONDS = int(os.getenv("SESSION_IDLE_S", "1800"))
+SESSIONS: dict[str, Session] = {}
+SID_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+
+
+def _evict(sess: Session) -> None:
+    for task in (sess.replay_task, sess.worker_task):
+        if task:
+            task.cancel()
+
+
+def get_session(sid: str = Query("default")) -> Session:
+    if not SID_RE.match(sid):
+        raise HTTPException(400, "invalid session id")
+    now = time.monotonic()
+    for key, s in list(SESSIONS.items()):
+        if now - s.last_seen > IDLE_SECONDS and not s.clients:
+            _evict(SESSIONS.pop(key))
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        if len(SESSIONS) >= MAX_SESSIONS:
+            oldest = min((k for k, s in SESSIONS.items() if not s.clients), key=lambda k: SESSIONS[k].last_seen, default=None)
+            if oldest is None:
+                raise HTTPException(503, "the demo is busy, please try again in a minute")
+            _evict(SESSIONS.pop(oldest))
+        sess = SESSIONS[sid] = Session(SEED, GATEWAY)
+    sess.last_seen = now
+    return sess
 
 
 class Control(BaseModel):
@@ -268,13 +304,19 @@ async def index():
     return FileResponse(WEB / "index.html")
 
 
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "model": GATEWAY.mode, "sessions": len(SESSIONS), "synthetic_data_only": True}
+
+
 @app.get("/api/state")
-async def get_state():
-    return session.full_state()
+async def get_state(sid: str = Query("default")):
+    return get_session(sid).full_state()
 
 
 @app.post("/api/control")
-async def control(body: Control):
+async def control(body: Control, sid: str = Query("default")):
+    session = get_session(sid)
     if body.speed:
         session.speed = max(1.0, min(body.speed, 240.0))
     if body.inject_faults is not None:
@@ -293,7 +335,8 @@ async def control(body: Control):
 
 
 @app.get("/api/stream")
-async def stream(request: Request):
+async def stream(request: Request, sid: str = Query("default")):
+    session = get_session(sid)
     q: asyncio.Queue = asyncio.Queue()
     session.clients.add(q)
 
@@ -303,6 +346,7 @@ async def stream(request: Request):
             while True:
                 if await request.is_disconnected():
                     break
+                session.last_seen = time.monotonic()
                 try:
                     yield await asyncio.wait_for(q.get(), timeout=15)
                 except asyncio.TimeoutError:
@@ -314,29 +358,30 @@ async def stream(request: Request):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@app.post("/api/suggestions/{sid}/approve")
-async def approve(sid: str, body: Approve | None = None):
-    return await session.approve(sid, body.slots if body else None)
+@app.post("/api/suggestions/{sug_id}/approve")
+async def approve(sug_id: str, body: Approve | None = None, sid: str = Query("default")):
+    return await get_session(sid).approve(sug_id, body.slots if body else None)
 
 
-@app.post("/api/suggestions/{sid}/reject")
-async def reject(sid: str, body: Reject | None = None):
-    return await session.reject(sid, body.reason if body else "not for air")
+@app.post("/api/suggestions/{sug_id}/reject")
+async def reject(sug_id: str, body: Reject | None = None, sid: str = Query("default")):
+    return await get_session(sid).reject(sug_id, body.reason if body else "not for air")
 
 
 @app.get("/api/overlays")
-async def overlays(feed: str | None = None):
+async def overlays(feed: str | None = None, sid: str = Query("default")):
     """Timed, machine-readable overlay cues for a downstream graphics engine."""
+    session = get_session(sid)
     items = [o for o in session.overlays if feed is None or o["feed"] == feed]
     return {"match": {"seed": session.seed, "home": session.meta["home"], "away": session.meta["away"]},
             "clock": "match seconds", "overlays": items}
 
 
 @app.get("/api/audit")
-async def audit():
-    return session.audit
+async def audit(sid: str = Query("default")):
+    return get_session(sid).audit
 
 
 @app.post("/api/package")
-async def package(body: PackageReq):
-    return await session.make_package(body.phase)
+async def package(body: PackageReq, sid: str = Query("default")):
+    return await get_session(sid).make_package(body.phase)
