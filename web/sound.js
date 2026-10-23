@@ -119,6 +119,7 @@ const Sound = (() => {
     if (!enabled || !voice || !text) return;
     const level = opts.level ?? 1;
     if (isSpeaking()) { if (!opts.interrupt) return; stopVoice(); }
+    const asked = performance.now();
     if (neural && failures < 3) {
       const ctrl = new AbortController();
       inflight = ctrl;
@@ -129,6 +130,8 @@ const Sound = (() => {
         const url = URL.createObjectURL(await res.blob());
         if (inflight !== ctrl) { URL.revokeObjectURL(url); return; }
         inflight = null;
+        // A line that arrives late describes a moment that has passed: skip it, except big moments.
+        if (!opts.interrupt && performance.now() - asked > 1500) { URL.revokeObjectURL(url); return; }
         const a = new Audio(url);
         a.volume = 1;
         current = a;

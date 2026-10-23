@@ -61,7 +61,8 @@ class ModelGateway:
                                                      api_key=self.api_key or "not-needed")
         self._agents: dict[str, Agent] = {}
         self._instructions: dict[str, str] = {}
-        self._lock = asyncio.Lock()
+        self._sem = asyncio.Semaphore(int(os.getenv("LLM_CONCURRENCY", "4")))
+        self._pace = asyncio.Lock()
         self._last_call = 0.0
         self.cache: dict[str, str] = {}
         if CACHE_PATH.exists():
@@ -92,18 +93,19 @@ class ModelGateway:
         agent = self._agents.get(name)
         if agent is None:
             return None, "fallback (no model configured)"
-        async with self._lock:
-            wait = self.min_interval - (time.monotonic() - self._last_call)
-            if wait > 0:
-                await asyncio.sleep(wait)
+        async with self._sem:  # a few calls in parallel; optional spacing for rate-limited free tiers
+            if self.min_interval > 0:
+                async with self._pace:
+                    wait = self.min_interval - (time.monotonic() - self._last_call)
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    self._last_call = time.monotonic()
             try:
                 resp = await asyncio.wait_for(agent.run(prompt), timeout=45)
                 text = resp.text
             except Exception as exc:  # rate limits, network, content filter
                 log.warning("agent %s failed: %s", name, exc)
                 return None, f"fallback ({type(exc).__name__})"
-            finally:
-                self._last_call = time.monotonic()
         parsed = _parse_json(text)
         if parsed is None:
             return None, "fallback (unparseable reply)"
@@ -391,7 +393,7 @@ async def adapt_feeds(gw: ModelGateway, c: Candidate, graphic: dict, club: str) 
     for feed in FEEDS:
         slots = (result or {}).get(feed)
         if not isinstance(slots, dict):
-            feeds[feed] = {"slots": dict(graphic["slots"]), "source": "approved graphic", "rewritten": []}
+            feeds[feed] = {"slots": dict(graphic["slots"]), "source": f"approved graphic ({source})", "rewritten": []}
             continue
         # Check slot by slot: keep every rewritten slot that passes, fall back only where one fails.
         merged = {k: str(slots.get(k, "")).strip() or v for k, v in graphic["slots"].items()}

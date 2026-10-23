@@ -61,6 +61,8 @@ class Session:
     # --- lifecycle ----------------------------------------------------------
 
     def reset(self) -> None:
+        for task in getattr(self, "bg_tasks", set()):
+            task.cancel()
         for task in (getattr(self, "replay_task", None), getattr(self, "worker_task", None)):
             if task:
                 task.cancel()
@@ -76,6 +78,7 @@ class Session:
         self.suggestions: dict[str, dict] = {}
         self.candidates: dict[str, Candidate] = {}
         self.overlays: list[dict] = []
+        self.bg_tasks: set[asyncio.Task] = set()
         self.audit: list[dict] = []
         self.packages: list[dict] = []
         self.queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
@@ -83,7 +86,7 @@ class Session:
 
     def ensure_worker(self) -> None:
         if self.worker_task is None or self.worker_task.done():
-            self.worker_task = asyncio.create_task(self._worker())
+            self.worker_task = asyncio.create_task(self._workers())
 
     def start(self) -> None:
         self.ensure_worker()
@@ -143,14 +146,29 @@ class Session:
                 self.on_break = False
                 await self.broadcast("status", self.status())
         self.running = False
+        for sug in self.suggestions.values():
+            if sug["status"] == "queued":
+                sug["status"], sug["dropped_reason"] = "dropped", "expired: full time"
+                await self.broadcast("suggestion", sug)
         await self.broadcast("status", self.status())
+
+    async def _workers(self) -> None:
+        # Several moments are drafted in parallel so the desk keeps pace with the match.
+        await asyncio.gather(*(self._worker() for _ in range(WORKERS)))
 
     async def _worker(self) -> None:
         while True:
             _, _, _, cid = await self.queue.get()
             c = self.candidates.get(cid)
             sug = self.suggestions.get(cid)
-            if not c or not sug:
+            if not c or not sug or sug["status"] != "queued":
+                continue
+            limit = STALE_GOAL_S if c.kind == "goal" else STALE_S
+            if self.state.finished or self.state.t - c.t > limit:
+                # Too late to air: drafting it now would only show the producer an old moment.
+                sug["status"] = "dropped"
+                sug["dropped_reason"] = "expired: the match moved on before the agents reached it"
+                await self.broadcast("suggestion", sug)
                 continue
             sug["status"] = "drafting"
             await self.broadcast("suggestion", sug)
@@ -203,26 +221,52 @@ class Session:
                 raise HTTPException(400, {"issues": issues})
             sug["graphic"] = {**sug["graphic"], "slots": slots, "edited": True}
             self.log("edited", sid, json.dumps(slots))
-        sug["status"] = "adapting"
-        await self.broadcast("suggestion", sug)
-        club_name = self.meta["teams"][0 if self.club == self.meta["home"] else 1]["name"]
-        feeds, source = await adapt_feeds(self.gw, c, graphic, club_name)
+        # On air immediately with the approved text in every feed; FeedAdapter's fan-app and club
+        # versions replace theirs a few seconds later, after their own fact check.
         t_in = self.state.t
         duration = TEMPLATES[graphic["template"]]["duration_s"]
-        new_overlays = []
-        for feed, content in feeds.items():
-            ov = {"id": f"{sid}-{feed}", "suggestion_id": sid, "feed": feed, "template": graphic["template"],
-                  "t_in": t_in, "t_out": t_in + duration, "duration_s": duration, "slots": content["slots"],
-                  "data": self._overlay_data(c), "source_event_ids": c.source_event_ids,
-                  "content_source": content["source"]}
-            new_overlays.append(ov)
+        feeds = {f: {"slots": dict(graphic["slots"]), "source": "approved graphic", "rewritten": [],
+                     "pending": f != "main"} for f in FEEDS}
+        new_overlays = [self._overlay(sid, c, graphic, f, feeds[f], t_in, duration) for f in FEEDS]
         self.overlays.extend(new_overlays)
-        sug.update({"status": "approved", "feeds": feeds, "approved_at_t": t_in})
-        self.log("approved", sid, f"on air in {len(feeds)} feeds (adapter: {source})")
+        sug.update({"status": "approved", "feeds": feeds, "approved_at_t": t_in, "feeds_pending": True})
+        self.log("approved", sid, f"on air in {len(feeds)} feeds")
         await self.broadcast("suggestion", sug)
         await self.broadcast("overlays", new_overlays)
         await self.broadcast("audit", self.audit[-1])
+        task = asyncio.create_task(self._adapt(sid, c, graphic, t_in, duration))
+        self.bg_tasks.add(task)
+        task.add_done_callback(self.bg_tasks.discard)
         return sug
+
+    def _overlay(self, sid: str, c: Candidate, graphic: dict, feed: str, content: dict, t_in: float, duration: float) -> dict:
+        return {"id": f"{sid}-{feed}", "suggestion_id": sid, "feed": feed, "template": graphic["template"],
+                "t_in": t_in, "t_out": t_in + duration, "duration_s": duration, "slots": content["slots"],
+                "data": self._overlay_data(c), "source_event_ids": c.source_event_ids,
+                "content_source": content["source"]}
+
+    async def _adapt(self, sid: str, c: Candidate, graphic: dict, t_in: float, duration: float) -> None:
+        sug = self.suggestions[sid]
+        club_name = self.meta["teams"][0 if self.club == self.meta["home"] else 1]["name"]
+        try:
+            adapted, source = await adapt_feeds(self.gw, c, graphic, club_name)
+        except Exception as exc:  # keep the approved text on air
+            adapted, source = {}, f"fallback ({type(exc).__name__})"
+        updates = []
+        for feed in FEEDS:
+            if feed == "main":
+                continue  # TV airs exactly what the producer approved
+            content = {**adapted.get(feed, sug["feeds"][feed]), "pending": False}
+            sug["feeds"][feed] = content
+            ov = self._overlay(sid, c, graphic, feed, content, t_in, duration)
+            self.overlays = [o for o in self.overlays if o["id"] != ov["id"]] + [ov]
+            updates.append({**ov, "update": True})
+        sug["feeds"]["main"]["pending"] = False
+        sug["feeds_pending"] = False
+        self.log("feeds_adapted", sid, f"fan app and club versions (adapter: {source})", actor="agents")
+        await self.broadcast("suggestion", sug)
+        await self.broadcast("overlays", updates)
+        await self.broadcast("audit", self.audit[-1])
 
     def _overlay_data(self, c: Candidate) -> dict:
         data = {"team": c.team, "kind": c.kind, "minute": c.minute}
@@ -283,6 +327,7 @@ GATEWAY = build_gateway()
 SEED = int(os.getenv("MATCH_SEED", "1"))
 MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "40"))
 IDLE_SECONDS = int(os.getenv("SESSION_IDLE_S", "1800"))
+WORKERS = int(os.getenv("AGENT_WORKERS", "3"))
 HALFTIME_S = float(os.getenv("HALFTIME_BREAK_S", "8"))  # real seconds of half-time break
 STALE_S = int(os.getenv("STALE_MATCH_S", "360"))            # 6 match minutes for most moments
 STALE_GOAL_S = int(os.getenv("STALE_GOAL_MATCH_S", "600"))  # 10 for goals

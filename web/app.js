@@ -246,17 +246,21 @@ function feedNote(ov) {
   const label = FEED_LABEL[ov.feed] || ov.feed;
   const sug = S.suggestions.get(ov.suggestion_id);
   const f = sug?.feeds?.[ov.feed];
+  if (f?.pending) return `${label}: FeedAdapter is rewriting this for the ${label.toLowerCase()} audience; the TV text is shown meanwhile.`;
   if (f?.rewritten?.length) return `${label} version written by FeedAdapter${f.blocked?.length ? `; ${f.blocked.length} line(s) kept from TV after the Fact Checker blocked the rewrite` : ""}.`;
   if (ov.feed === "main") return "TV version: the graphic exactly as you approved it.";
   return `${label} shows the TV text: ${String(ov.content_source || "").includes("fallback") ? "the AI rewrite was unavailable" : "the rewrite did not pass the Fact Checker"}.`;
 }
 
-function showOnAir(ov) {
+function showOnAir(ov, inPlace = false) {
   $("screen-gfx").innerHTML = gfxHTML(ov.template, ov.slots, ov.data);
   $("feed-desc").textContent = `${S.feeds[ov.feed] || ""} ${feedNote(ov)}`;
+  S.onScreen = ov.suggestion_id;
+  if (inPlace) return;
   $("onair").hidden = false; $("strip-empty").hidden = true; $("onair-strip").classList.add("live");
   clearTimeout(S.screenTimer);
   S.screenTimer = setTimeout(() => {
+    S.onScreen = null;
     $("feed-desc").textContent = S.feeds[S.feed] || "";
     $("screen-gfx").innerHTML = ""; $("onair").hidden = true; $("strip-empty").hidden = false; $("onair-strip").classList.remove("live");
   }, ov.duration_s * 1000);
@@ -402,7 +406,8 @@ function upsert(sug) {
     toast(`On air: “${sug.candidate.title}” in ${Object.keys(sug.feeds || {}).length || 3} feeds`);
     setAgent("FeedAdapter", "pass", "Wrote 3 feeds");
   }
-  if (sug.status === "adapting") setAgent("FeedAdapter", "active", "Working");
+  if (sug.status === "adapting" || sug.feeds_pending) setAgent("FeedAdapter", "active", "Writing fan app + club");
+  if (prev?.feeds_pending && !sug.feeds_pending) setAgent("FeedAdapter", "pass", "Wrote 3 feeds");
   renderQueue();
 }
 
@@ -458,9 +463,15 @@ function connect() {
   on("suggestion", upsert);
   on("trace", (t) => { const s = S.suggestions.get(t.id); if (s) { s.trace = [...(s.trace || []), t]; } onTrace(t); renderQueue(); });
   on("overlays", (ovs) => {
-    S.overlays.push(...ovs);
+    ovs.forEach((o) => { S.overlays = S.overlays.filter((x) => x.id !== o.id); S.overlays.push(o); });
     const mine = ovs.find((o) => o.feed === S.feed);
-    if (mine) { showOnAir(mine); Sound.sting(); Commentary.onAir(mine.slots); }
+    if (!mine) return;
+    if (mine.update) {
+      // FeedAdapter's version arrived: swap the text in place if that graphic is still on screen.
+      if (S.onScreen === mine.suggestion_id) showOnAir(mine, true);
+      return;
+    }
+    showOnAir(mine); Sound.sting(); Commentary.onAir(mine.slots);
   });
   on("audit", addAudit);
   on("package", (p) => { renderPackage(p); toast(`Studio rundown ready (${p.phase.replace(/_/g, " ")})`); });
