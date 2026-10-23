@@ -241,3 +241,21 @@ h3 { margin: 0; }
   .actions .btn { padding: 0 12px; }
 }
 @media (max-width: 700px) { .kb-hint { display: none; } }
+
+/* ---------- player numbers, lineups, sound ---------- */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#btn-sound.on { background: var(--ok); border-color: var(--ok); color: #05261A; }
+.pitch text { font-family: var(--font); pointer-events: none; }
+.ball-now { position: absolute; top: 4%; right: 3%; max-width: 62%; display: flex; align-items: center; gap: 8px;
+  background: rgba(8, 12, 22, .88); color: #fff; padding: 6px 10px; border-radius: 6px; font-size: .86rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ball-now .sw, .lineup .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; display: inline-block; }
+.screen-gfx .gfx.player_tag, .screen-gfx .gfx.pass_card { top: 20%; }
+.lineups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0 6px; }
+.lineup h3 { display: flex; align-items: center; gap: 8px; font-size: .95rem; margin: 0 0 8px; }
+.lineup ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.lineup li { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: .88rem; }
+.lineup .num { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: .8rem;
+  background: var(--teamc); color: #fff; font-variant-numeric: tabular-nums; }
+.btn.approve kbd { color: #05261A; border-color: #05261A66; }
+@media (max-width: 700px) { .lineups { grid-template-columns: 1fr; } .ball-now { font-size: .72rem; max-width: 55%; } }

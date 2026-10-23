@@ -34,6 +34,10 @@
         <button type="button" data-speed="30">30×</button>
         <button type="button" data-speed="60">60×</button>
       </div>
+      <button id="btn-sound" class="btn icon" type="button" aria-pressed="false" title="Stadium sound">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path id="sound-waves" d="M16 9c1.2 1.6 1.2 4.4 0 6M18.5 6.5c2.6 3 2.6 8 0 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path id="sound-x" d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <span class="sr-only" id="sound-label">Turn stadium sound on</span>
+      </button>
       <button id="btn-settings" class="btn icon" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settings" title="Settings">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.4 4.6-.1-2.2 2-1.6-2-3.4-2.4.8a8 8 0 0 0-1.9-1.1L15.5 3h-4L11 5.6a8 8 0 0 0-1.9 1.1l-2.4-.8-2 3.4 2 1.6-.1 2.2-2 1.6 2 3.4 2.4-.8c.6.5 1.2.8 1.9 1.1l.5 2.6h4l.5-2.6a8 8 0 0 0 1.9-1.1l2.4.8 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
       </button>
@@ -45,6 +49,11 @@
           <input type="checkbox" id="faults">
           <span class="track" aria-hidden="true"></span>
           <span>Fault test <small>Corrupts one number in every first draft so you can watch the Fact Checker catch it.</small></span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="voice">
+          <span class="track" aria-hidden="true"></span>
+          <span>Commentator voice <small>Reads goals and every graphic you put on air, using your browser's built-in voice. Needs stadium sound on.</small></span>
         </label>
         <button id="btn-reset" class="btn ghost" type="button">Restart match</button>
         <p class="model" id="model-badge"></p>
@@ -64,6 +73,7 @@
         <div class="monitor" id="monitor">
           <svg id="pitch" viewBox="-2 -2 109 72" class="pitch" role="img" aria-label="Last ten events on the pitch"></svg>
           <div class="screen-bug" id="screen-bug"></div>
+          <div class="ball-now" id="ball-now" aria-live="off"></div>
           <div class="screen-gfx" id="screen-gfx"></div>
         </div>
         <p class="feed-desc" id="feed-desc"></p>
@@ -87,6 +97,7 @@
         <div class="tab" data-pane="stats">
           <div class="momentum" id="momentum"></div>
           <div class="statgrid" id="statbars"></div>
+          <div class="lineups" id="lineups"></div>
           <p class="muted small">All figures are computed in code from synthetic events. xG and speeds are values of the synthetic simulation, not real tracking data.</p>
         </div>
         <div class="tab" data-pane="events" hidden><ol class="ticker" id="ticker"></ol></div>
@@ -124,6 +135,7 @@
   </main>
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <script src="/static/sound.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

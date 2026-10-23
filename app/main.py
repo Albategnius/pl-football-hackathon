@@ -116,6 +116,7 @@ class Session:
             self.state.apply(ev)
             self.idx += 1
             await self.broadcast("match_event", ev)
+            await self.expire_stale()
             for c in self.detector.check(ev):
                 self.candidates[c.id] = c
                 self.suggestions[c.id] = {"id": c.id, "candidate": c.to_dict(), "status": "queued", "trace": []}
@@ -158,6 +159,21 @@ class Session:
             if job.status == "pending":
                 self.log("proposed", cid, f"{job.graphic['template']} after {len(job.attempts)} draft(s)", actor="agents")
             await self.broadcast("suggestion", sug)
+
+    async def expire_stale(self) -> None:
+        """A live graphic loses its value fast: retire pending ideas once the moment has passed."""
+        for sid, sug in self.suggestions.items():
+            c = self.candidates.get(sid)
+            if sug["status"] != "pending" or not c:
+                continue
+            limit = STALE_GOAL_S if c.kind == "goal" else STALE_S
+            age = self.state.t - c.t
+            if age > limit:
+                sug["status"] = "dropped"
+                sug["dropped_reason"] = f"expired: the moment is {int(age // 60)} minutes old"
+                self.log("expired", sid, sug["dropped_reason"], actor="agents")
+                await self.broadcast("suggestion", sug)
+                await self.broadcast("audit", self.audit[-1])
 
     # --- producer actions ---------------------------------------------------
 
@@ -251,6 +267,8 @@ GATEWAY = build_gateway()
 SEED = int(os.getenv("MATCH_SEED", "1"))
 MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "40"))
 IDLE_SECONDS = int(os.getenv("SESSION_IDLE_S", "1800"))
+STALE_S = int(os.getenv("STALE_MATCH_S", "360"))            # 6 match minutes for most moments
+STALE_GOAL_S = int(os.getenv("STALE_GOAL_MATCH_S", "600"))  # 10 for goals
 SESSIONS: dict[str, Session] = {}
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 

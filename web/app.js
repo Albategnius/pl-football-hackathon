@@ -5,7 +5,7 @@ const S = {
   suggestions: new Map(), overlays: [], events: [],
   feed: "main", editing: new Set(), expanded: new Set(), screenTimer: null, started: false,
   hoverLock: false, dirty: false,
-  agentState: {},
+  agentState: {}, players: new Map(),
 };
 
 const AGENTS = [
@@ -20,6 +20,8 @@ const FEED_LABEL = { main: "Main", casual: "Casual", club: "Club" };
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const team = (id) => S.meta.teams.find((t) => t.id === id);
+const player = (id) => (id ? S.players.get(id) : null);
+const shirt = (id, name) => { const p = player(id); return p ? `#${p.number} ${esc(p.name)}` : esc(name || ""); };
 const clock = (t) => { const m = Math.floor(t / 60), s = Math.floor(t % 60); return `${m}:${String(s).padStart(2, "0")}`; };
 
 // One console per browser tab, kept across reloads of that tab.
@@ -82,6 +84,7 @@ function renderStatus() {
   $("play-ico").setAttribute("d", st.running ? "M7 5h4v14H7zM13 5h4v14h-4z" : "M8 5v14l11-7z");
   $("btn-play").disabled = st.finished;
   document.querySelector(".tally-dot").classList.toggle("live", st.running);
+  Sound.setRunning(st.running);
 }
 
 // --- pitch + stats --------------------------------------------------------------
@@ -97,19 +100,37 @@ function pitchLines() {
 function renderPitch() {
   const pts = S.events.filter((e) => e.x !== undefined).slice(-10);
   let marks = "";
+  const token = (x, y, id, c, o, big) => {
+    const p = player(id), r = big ? 2.1 : 1.75;
+    return `<g opacity="${o}"><circle cx="${x}" cy="${y}" r="${r}" fill="${c}" stroke="#0b1020" stroke-width=".35"/>${p
+      ? `<text x="${x}" y="${y + 0.62}" text-anchor="middle" font-size="${p.number > 9 ? 1.65 : 1.85}" font-weight="800" fill="#fff">${p.number}</text>` : ""}</g>`;
+  };
   pts.forEach((e, i) => {
-    const c = team(e.team)?.color || "#fff", o = 0.3 + 0.7 * (i / Math.max(1, pts.length - 1));
+    const c = team(e.team)?.color || "#fff", o = (0.25 + 0.75 * (i / Math.max(1, pts.length - 1))).toFixed(2);
     if (e.type === "pass" || e.type === "carry") {
       marks += `<line x1="${e.x}" y1="${e.y}" x2="${e.end_x}" y2="${e.end_y}" stroke="${c}" stroke-width=".7" opacity="${o}" stroke-linecap="round" ${e.outcome === "incomplete" ? 'stroke-dasharray="1.5 1"' : ""}/>`;
     }
-    marks += `<circle cx="${e.x}" cy="${e.y}" r="${e.type === "shot" ? 1.7 : 1}" fill="${c}" stroke="#0b1020" stroke-width=".3" opacity="${o}"/>`;
+  });
+  pts.forEach((e, i) => {
+    const c = team(e.team)?.color || "#fff", o = (0.25 + 0.75 * (i / Math.max(1, pts.length - 1))).toFixed(2);
+    marks += token(e.x, e.y, e.player_id, c, o, e.type === "shot" || e.type === "goal");
   });
   const last = pts[pts.length - 1];
+  let now = "";
   if (last) {
-    const ok = last.end_x !== undefined && last.outcome !== "incomplete";
-    marks += `<circle cx="${ok ? last.end_x : last.x}" cy="${ok ? last.end_y : last.y}" r="1.4" fill="#fff" stroke="#0b1020" stroke-width=".4"/>`;
+    const c = team(last.team)?.color || "#fff";
+    const passed = last.end_x !== undefined && last.outcome === "complete" && last.receiver_id;
+    if (passed) marks += token(last.end_x, last.end_y, last.receiver_id, c, 1, false);
+    const bx = last.end_x !== undefined && last.outcome !== "incomplete" ? last.end_x : last.x;
+    const by = last.end_y !== undefined && last.outcome !== "incomplete" ? last.end_y : last.y;
+    marks += `<circle cx="${bx + 1.6}" cy="${by - 1.6}" r=".9" fill="#fff" stroke="#0b1020" stroke-width=".3"/>`;
+    const verb = { pass: passed ? "→" : "pass lost", carry: "carries", shot: "shoots", goal: "scores", tackle: "tackles", foul: "fouls",
+      possession_change: "wins the ball", kickoff: "kicks off", pressure: "presses" }[last.type] || "";
+    now = `<span class="sw" style="background:${c}"></span><b>${shirt(last.player_id, last.player)}</b> ${esc(verb)}${passed ? ` <b>${shirt(last.receiver_id, last.receiver)}</b>` : ""}`;
   }
   $("pitch").innerHTML = pitchLines() + marks;
+  $("ball-now").innerHTML = now;
+  $("ball-now").hidden = !now;
 }
 
 function renderStats() {
@@ -129,8 +150,13 @@ function renderStats() {
   }).join("");
 }
 
+function renderLineups() {
+  $("lineups").innerHTML = S.meta.teams.map((t) => `<div class="lineup"><h3><span class="sw" style="background:${t.color}"></span>${esc(t.name)}</h3><ol>${
+    t.players.map((p) => `<li><span class="num" style="--teamc:${t.color}">${p.number}</span><span>${esc(p.name)}</span><span class="muted small">${esc(p.role)}</span></li>`).join("")}</ol></div>`).join("");
+}
+
 function tickerLine(e) {
-  const who = e.player ? esc(e.player) : "";
+  const who = e.player ? shirt(e.player_id, e.player) : "";
   const tm = e.team ? esc(team(e.team).short) : "";
   switch (e.type) {
     case "goal": return ["goal", `Goal ${tm} — ${who}`];
@@ -264,10 +290,10 @@ function fullCard(sug, isTop) {
     html += `<form class="edit-form" data-id="${sug.id}">${Object.entries(limits).map(([k, lim]) =>
       `<label>${esc(k.replace(/_/g, " "))} <span class="muted">(max ${lim} characters)</span><input type="text" name="${k}" maxlength="${lim + 20}" value="${esc(sug.graphic.slots[k] || "")}"></label>`).join("")}
       <div class="edit-issues" aria-live="polite"></div>
-      <div class="actions"><button class="btn approve" type="submit">Check and put on air</button>
+      <div class="actions"><button class="btn approve" type="submit">✓ Check and approve</button>
       <button class="btn ghost" type="button" data-act="cancel" data-id="${sug.id}">Cancel</button></div></form>`;
   } else {
-    html += `<div class="actions"><button class="btn approve" type="button" data-act="approve" data-id="${sug.id}">Put on air${isTop ? " <kbd>A</kbd>" : ""}</button>
+    html += `<div class="actions"><button class="btn approve" type="button" data-act="approve" data-id="${sug.id}" title="Approve and put it on air in all 3 feeds">✓ Approve${isTop ? " <kbd>A</kbd>" : ""}</button>
       <button class="btn" type="button" data-act="edit" data-id="${sug.id}">Edit</button>
       <button class="btn danger" type="button" data-act="reject" data-id="${sug.id}">Reject${isTop ? " <kbd>R</kbd>" : ""}</button></div>`;
   }
@@ -319,8 +345,9 @@ function renderQueue(force = false) {
 
   $("history-count").textContent = done.length;
   $("history").innerHTML = done.map((s) => {
-    const label = s.status === "approved" ? "Aired" : s.status === "rejected" ? "Rejected" : "Skipped";
-    const detail = s.status === "dropped" ? `MomentScout: ${s.dropped_reason || ""}` : (s.feeds ? `${Object.keys(s.feeds).length} feeds` : (s.reject_reason || ""));
+    const expired = s.status === "dropped" && (s.dropped_reason || "").startsWith("expired");
+    const label = s.status === "approved" ? "Aired" : s.status === "rejected" ? "Rejected" : expired ? "Expired" : "Skipped";
+    const detail = expired ? s.dropped_reason.replace(/^expired: /, "") : s.status === "dropped" ? `MomentScout: ${s.dropped_reason || ""}` : (s.feeds ? `${Object.keys(s.feeds).length} feeds` : (s.reject_reason || ""));
     return `<div class="history-row"><span class="muted">${s.candidate.minute}'</span><span>${esc(s.candidate.title)} <span class="muted small">${esc(detail)}</span></span>
       <span class="chip status-${s.status}">${label}</span></div>`;
   }).join("");
@@ -364,6 +391,7 @@ function loadFull(state) {
   Object.assign(S, { meta: state.meta, stats: state.stats, status: state.status, templates: state.templates,
     feeds: state.feeds, overlays: state.overlays, events: state.recent_events });
   S.started = state.status.running || state.status.progress > 0;
+  S.players = new Map(state.meta.teams.flatMap((t) => t.players.map((p) => [p.id, p])));
   S.suggestions = new Map(state.suggestions.map((s) => [s.id, s]));
   S.editing.clear(); S.expanded.clear(); S.agentState = {};
   $("ticker").innerHTML = ""; $("audit").innerHTML = ""; $("screen-gfx").innerHTML = ""; $("onair").hidden = true;
@@ -371,7 +399,7 @@ function loadFull(state) {
   state.audit.forEach(addAudit);
   state.recent_events.forEach(addTicker);
   if (state.packages.length) renderPackage(state.packages[state.packages.length - 1]);
-  renderFeedTabs(); renderScorebug(); renderStats(); renderPitch(); renderStatus(); renderPipeline(); renderQueue();
+  renderLineups(); renderFeedTabs(); renderScorebug(); renderStats(); renderPitch(); renderStatus(); renderPipeline(); renderQueue();
 }
 
 function connect() {
@@ -380,12 +408,17 @@ function connect() {
   on("match_event", (e) => {
     S.events.push(e); if (S.events.length > 60) S.events.shift();
     addTicker(e); renderPitch();
-    if (e.type === "goal") toast(`Goal! ${team(e.team).short} — ${e.player}`);
+    if (e.type === "goal") toast(`Goal! ${team(e.team).short} — ${player(e.player_id) ? `#${player(e.player_id).number} ` : ""}${e.player}`);
+    soundFor(e);
   });
   on("stats", (st) => { S.stats = st; renderScorebug(); renderStats(); });
   on("suggestion", upsert);
   on("trace", (t) => { const s = S.suggestions.get(t.id); if (s) { s.trace = [...(s.trace || []), t]; } onTrace(t); renderQueue(); });
-  on("overlays", (ovs) => { S.overlays.push(...ovs); const mine = ovs.find((o) => o.feed === S.feed); if (mine) showOnAir(mine); });
+  on("overlays", (ovs) => {
+    S.overlays.push(...ovs);
+    const mine = ovs.find((o) => o.feed === S.feed);
+    if (mine) { showOnAir(mine); Sound.sting(); setTimeout(() => Sound.speak(Object.values(mine.slots || {}).join(". ")), 700); }
+  });
   on("audit", addAudit);
   on("package", (p) => { renderPackage(p); toast(`Studio rundown ready (${p.phase.replace(/_/g, " ")})`); });
   on("status", (st) => { S.status = st; renderStatus(); });
@@ -393,9 +426,48 @@ function connect() {
   es.onerror = () => { es.close(); setTimeout(async () => { loadFull(await api("/api/state")); connect(); }, 1500); };
 }
 
+// --- sound ----------------------------------------------------------------------------
+
+function soundFor(e) {
+  if (!Sound.enabled) return;
+  switch (e.type) {
+    case "kickoff": case "half_start": return Sound.whistle([0.7]);
+    case "half_end": return Sound.whistle([0.3, 0.9]);
+    case "full_time": Sound.swell(0.45, 2.5, 1100); return Sound.whistle([0.3, 0.3, 1.1]);
+    case "foul": return Sound.whistle([0.22]);
+    case "shot": return e.outcome === "goal" ? null : Sound.swell(e.outcome === "saved" ? 0.45 : 0.34, 0.6);
+    case "goal": {
+      Sound.swell(0.95, 4.5, 1700);
+      const p = player(e.player_id);
+      const sc = e.score || S.stats?.score, h = team(S.meta.home), a = team(S.meta.away);
+      return Sound.speak(`Goal! ${team(e.team).name}. ${p ? `Number ${p.number}, ` : ""}${e.player}.${sc ? ` ${h.short} ${sc[h.id]}, ${a.short} ${sc[a.id]}.` : ""}`);
+    }
+    default: return null;
+  }
+}
+
+function renderSound() {
+  const on = Sound.enabled;
+  $("btn-sound").setAttribute("aria-pressed", String(on));
+  $("btn-sound").classList.toggle("on", on);
+  $("sound-waves").style.display = on ? "" : "none";
+  $("sound-x").style.display = on ? "none" : "";
+  $("sound-label").textContent = on ? "Turn stadium sound off" : "Turn stadium sound on";
+  $("btn-sound").title = on ? "Stadium sound on" : "Stadium sound off";
+  $("voice").checked = Sound.voice;
+}
+
+function toggleSound(on) {
+  Sound.setEnabled(on);
+  Sound.setRunning(!!S.status?.running);
+  renderSound();
+}
+
 async function startOrPause() {
   if (S.status?.running) return api("/api/control", { action: "pause" });
   S.started = true;
+  // Starting the match is a click, so the browser lets the stadium sound begin here.
+  if (!Sound.enabled && Sound.wantedByDefault()) { toggleSound(true); toast("Stadium sound on. Use the speaker button to mute."); }
   renderQueue();
   return api("/api/control", { action: "start" });
 }
@@ -409,6 +481,7 @@ document.addEventListener("click", async (ev) => {
     return;
   }
   if (b.id === "btn-play" || b.hasAttribute("data-start")) return startOrPause();
+  if (b.id === "btn-sound") return toggleSound(!Sound.enabled);
   if (b.id === "btn-reset") { closeSettings(); return api("/api/control", { action: "reset" }); }
   if (b.id === "btn-package") return api("/api/package", { phase: "on_demand" });
   if (b.id === "btn-settings") {
@@ -477,6 +550,8 @@ $("faults").addEventListener("change", (e) => {
   api("/api/control", { inject_faults: e.target.checked });
   toast(e.target.checked ? "Fault test on: first drafts will contain a wrong number." : "Fault test off.", e.target.checked);
 });
+$("voice").addEventListener("change", (e) => { Sound.setVoice(e.target.checked); if (e.target.checked && !Sound.enabled) toggleSound(true); });
 $("club").addEventListener("change", (e) => api("/api/control", { club: e.target.value }));
 
+renderSound();
 api("/api/state").then((st) => { loadFull(st); connect(); }).catch(() => toast("Could not reach the server. Refresh to try again.", true));
