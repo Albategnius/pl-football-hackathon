@@ -1,7 +1,7 @@
 "use strict";
 
 // Stadium atmosphere synthesised in the browser with the Web Audio API (no audio files),
-// plus an optional commentator voice using the browser's built-in speech synthesis.
+// plus a commentator voice: Azure AI Speech neural voice when available, browser speech otherwise.
 const Sound = (() => {
   const BASE = 0.16;          // crowd murmur level while the match runs
   let ctx = null, master, crowd, crowdTone, enabled = false, voice = true, running = false, lastWhistle = 0;
@@ -90,15 +90,64 @@ const Sound = (() => {
     });
   }
 
-  function speak(text) {
-    if (!enabled || !voice || !("speechSynthesis" in window) || !text) return;
+  let chosenVoice = null;
+  function pickVoice() {
+    const voices = window.speechSynthesis.getVoices();
+    const prefer = ["Google UK English Male", "Daniel", "Microsoft Ryan", "Microsoft George", "Arthur", "Oliver", "Google UK English Female"];
+    chosenVoice = prefer.map((n) => voices.find((v) => v.name.includes(n))).find(Boolean)
+      || voices.find((v) => v.lang === "en-GB") || voices.find((v) => v.lang.startsWith("en")) || null;
+  }
+  if ("speechSynthesis" in window) { pickVoice(); window.speechSynthesis.onvoiceschanged = pickVoice; }
+
+  // Neural voice (Azure AI Speech via /api/tts) when the server has it, the browser's voice otherwise.
+  let neural = false, failures = 0, current = null, inflight = null;
+  const clean = (t) => t.replace(/\bxG\b/g, "expected goals").replace(/\bkm\/h\b/g, "kilometres per hour");
+
+  function isSpeaking() {
     const synth = window.speechSynthesis;
-    if (synth.pending) synth.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/\bxG\b/g, "expected goals").replace(/\bkm\/h\b/g, "kilometres per hour"));
-    const voices = synth.getVoices();
-    u.voice = voices.find((v) => v.lang === "en-GB") || voices.find((v) => v.lang.startsWith("en")) || null;
-    u.lang = "en-GB"; u.rate = 1.07; u.volume = 1;
-    synth.speak(u);
+    return !!inflight || !!(current && !current.ended && !current.paused) || !!(synth && (synth.speaking || synth.pending));
+  }
+
+  function stopVoice() {
+    inflight?.abort(); inflight = null;
+    if (current) { current.pause(); current = null; }
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  }
+
+  // level: 0 colour, 1 play-by-play, 2 big chance, 3 goal
+  async function speak(text, opts = {}) {
+    if (!enabled || !voice || !text) return;
+    const level = opts.level ?? 1;
+    if (isSpeaking()) { if (!opts.interrupt) return; stopVoice(); }
+    if (neural && failures < 3) {
+      const ctrl = new AbortController();
+      inflight = ctrl;
+      try {
+        const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: clean(text), level }), signal: ctrl.signal });
+        if (!res.ok) throw Object.assign(new Error("tts"), { status: res.status });
+        const url = URL.createObjectURL(await res.blob());
+        if (inflight !== ctrl) { URL.revokeObjectURL(url); return; }
+        inflight = null;
+        const a = new Audio(url);
+        a.volume = 1;
+        current = a;
+        a.onended = a.onerror = () => { URL.revokeObjectURL(url); if (current === a) current = null; };
+        await a.play();
+        return;
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        if (inflight === ctrl) inflight = null;
+        if (err.status !== 429) failures++;
+      }
+    }
+    if (!("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(clean(text));
+    if (!chosenVoice) pickVoice();
+    u.voice = chosenVoice; u.lang = chosenVoice?.lang || "en-GB";
+    const ex = level >= 3 ? 2 : level === 2 ? 1 : 0;
+    u.rate = [1.08, 1.16, 1.22][ex]; u.pitch = [1, 1.08, 1.18][ex]; u.volume = 1;
+    window.speechSynthesis.speak(u);
   }
 
   function setRunning(isRunning) {
@@ -110,15 +159,17 @@ const Sound = (() => {
     enabled = on;
     save("pc_sound", on);
     if (on) { init(); ctx?.resume(); level(running ? BASE : 0, 1.5); }
-    else { level(0, 0.4); if ("speechSynthesis" in window) window.speechSynthesis.cancel(); }
+    else { level(0, 0.4); stopVoice(); }
   }
 
-  function setVoice(on) { voice = on; save("pc_voice", on); if (!on && "speechSynthesis" in window) window.speechSynthesis.cancel(); }
+  function setVoice(on) { voice = on; save("pc_voice", on); if (!on) stopVoice(); }
 
   return {
     get enabled() { return enabled; },
     get voice() { return voice; },
     wantedByDefault: () => pref("pc_sound", true),
-    setEnabled, setVoice, setRunning, swell, whistle, sting, speak,
+    setEnabled, setVoice, setRunning, swell, whistle, sting, speak, isSpeaking,
+    setNeural: (on) => { neural = !!on; },
+    get neural() { return neural; },
   };
 })();

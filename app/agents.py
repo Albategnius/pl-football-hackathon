@@ -148,9 +148,13 @@ INSTRUCTIONS = {
         '{"template": "<template name>", "slots": {"<slot>": "<text>"}}'
     ),
     FEED_ADAPTER: (
-        "You adapt an approved broadcast graphic for several output feeds. Keep the same template and the "
-        "same slot names, respect every character limit, and do not introduce numbers that are not in the "
-        "facts. Reply with JSON only: "
+        "You adapt an approved broadcast graphic for three output feeds, and the three versions must read "
+        "clearly differently. main = TV studio: crisp, neutral, precise football vocabulary. casual = fan app "
+        "for new fans: plain words, explain jargon (say 'chance quality' rather than xG where it fits), "
+        "friendly. club = the chosen club's own channel: 'we'/'our', warm and partisan, still factual. "
+        "Keep the same template and slot names. Every slot must stay within its character limit (count "
+        "carefully; shorter is safer). Keep value slots such as numbers exactly as given. Never add a number "
+        "that is not in the facts. Reply with JSON only: "
         '{"main": {"<slot>": "<text>"}, "casual": {...}, "club": {...}}'
     ),
     STUDIO: (
@@ -386,12 +390,22 @@ async def adapt_feeds(gw: ModelGateway, c: Candidate, graphic: dict, club: str) 
     feeds: dict[str, dict] = {}
     for feed in FEEDS:
         slots = (result or {}).get(feed)
-        candidate = {"template": tpl, "slots": slots} if isinstance(slots, dict) else None
-        if candidate is None or check_graphic(candidate, c.facts):
-            feeds[feed] = {"slots": dict(graphic["slots"]), "source": "approved graphic (adapter output failed check)"
-                           if candidate else "approved graphic"}
-        else:
-            feeds[feed] = {"slots": {k: str(v) for k, v in slots.items()}, "source": source}
+        if not isinstance(slots, dict):
+            feeds[feed] = {"slots": dict(graphic["slots"]), "source": "approved graphic", "rewritten": []}
+            continue
+        # Check slot by slot: keep every rewritten slot that passes, fall back only where one fails.
+        merged = {k: str(slots.get(k, "")).strip() or v for k, v in graphic["slots"].items()}
+        issues = check_graphic({"template": tpl, "slots": merged}, c.facts)
+        rewritten = []
+        for k in merged:
+            if any(f"'{k}'" in i for i in issues):
+                merged[k] = graphic["slots"][k]
+            elif merged[k] != graphic["slots"][k]:
+                rewritten.append(k)
+        if check_graphic({"template": tpl, "slots": merged}, c.facts):  # combined slots still fail: play it safe
+            merged, rewritten = dict(graphic["slots"]), []
+        feeds[feed] = {"slots": merged, "source": source if rewritten else "approved graphic", "rewritten": rewritten,
+                       "blocked": [k for k in graphic["slots"] if any(f"'{k}'" in i for i in issues)]}
     return feeds, source
 
 

@@ -13,7 +13,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+import hashlib
+
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,6 +27,7 @@ from .generator import generate_match  # noqa: E402
 from .moments import Candidate, MomentDetector  # noqa: E402
 from .stats import MatchState  # noqa: E402
 from .templates import FEEDS, TEMPLATES  # noqa: E402
+from . import tts  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -318,14 +321,48 @@ class PackageReq(BaseModel):
     phase: str = "on_demand"
 
 
+def _versioned_index() -> str:
+    """Stamp asset URLs with a content hash so every deploy reaches browsers without a hard refresh."""
+    digest = hashlib.sha256()
+    for f in sorted(WEB.glob("*")):
+        if f.is_file():
+            digest.update(f.read_bytes())
+    ver = digest.hexdigest()[:10]
+    html = (WEB / "index.html").read_text()
+    return re.sub(r'(/static/[\w.-]+\.(?:css|js))"', rf'\1?v={ver}"', html)
+
+
+INDEX_HTML = _versioned_index()
+
+
 @app.get("/")
 async def index():
-    return FileResponse(WEB / "index.html")
+    return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "model": GATEWAY.mode, "sessions": len(SESSIONS), "synthetic_data_only": True}
+    return {"status": "ok", "model": GATEWAY.mode, "voice": f"azure-neural ({tts.VOICE})" if tts.enabled() else "browser",
+            "sessions": len(SESSIONS), "synthetic_data_only": True}
+
+
+class SpeakBody(BaseModel):
+    text: str
+    level: int = 1
+
+
+@app.post("/api/tts")
+async def speak(body: SpeakBody):
+    """Commentary line -> MP3 from Azure AI Speech, with an excitement-dependent speaking style."""
+    if not tts.enabled():
+        raise HTTPException(404, "neural voice not configured")
+    try:
+        audio = await tts.synthesize(body.text, body.level)
+    except tts.TTSLimit as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except Exception as exc:  # network or service error: the browser falls back to its own voice
+        raise HTTPException(502, f"speech service error: {type(exc).__name__}") from exc
+    return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/state")

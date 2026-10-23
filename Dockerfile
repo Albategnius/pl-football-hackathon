@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PORT=8000
 WORKDIR /app
 
 RUN pip install "agent-framework-core>=1.22.0" "agent-framework-openai>=1.17.0" "faker>=40.43.0" \
-    "fastapi>=0.150.0" "python-dotenv>=1.2.4" "uvicorn>=0.54.0"
+    "fastapi>=0.150.0" "python-dotenv>=1.2.4" "uvicorn>=0.54.0" "httpx>=0.28.1"
 
 COPY app ./app
 COPY web ./web

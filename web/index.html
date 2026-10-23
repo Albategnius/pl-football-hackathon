@@ -53,7 +53,7 @@
         <label class="switch">
           <input type="checkbox" id="voice">
           <span class="track" aria-hidden="true"></span>
-          <span>Commentator voice <small>Reads goals and every graphic you put on air, using your browser's built-in voice. Needs stadium sound on.</small></span>
+          <span>Commentator voice <small>Live play-by-play built from the match data: passes, tackles, chances, goals and stats, plus every graphic you put on air. Uses your browser's built-in voice.</small></span>
         </label>
         <button id="btn-reset" class="btn ghost" type="button">Restart match</button>
         <p class="model" id="model-badge"></p>
@@ -146,6 +146,7 @@
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
   <script src="/static/sound.js"></script>
+  <script src="/static/commentary.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

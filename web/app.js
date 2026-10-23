@@ -225,11 +225,22 @@ function gfxHTML(tpl, slots, data) {
   }
 }
 
+function feedNote(ov) {
+  const label = FEED_LABEL[ov.feed] || ov.feed;
+  const sug = S.suggestions.get(ov.suggestion_id);
+  const f = sug?.feeds?.[ov.feed];
+  if (f?.rewritten?.length) return `${label} version written by FeedAdapter${f.blocked?.length ? `; ${f.blocked.length} line(s) kept from TV after the Fact Checker blocked the rewrite` : ""}.`;
+  if (ov.feed === "main") return "TV version: the graphic exactly as you approved it.";
+  return `${label} shows the TV text: ${String(ov.content_source || "").includes("fallback") ? "the AI rewrite was unavailable" : "the rewrite did not pass the Fact Checker"}.`;
+}
+
 function showOnAir(ov) {
   $("screen-gfx").innerHTML = gfxHTML(ov.template, ov.slots, ov.data);
+  $("feed-desc").textContent = `${S.feeds[ov.feed] || ""} ${feedNote(ov)}`;
   $("onair").hidden = false; $("strip-empty").hidden = true; $("onair-strip").classList.add("live");
   clearTimeout(S.screenTimer);
   S.screenTimer = setTimeout(() => {
+    $("feed-desc").textContent = S.feeds[S.feed] || "";
     $("screen-gfx").innerHTML = ""; $("onair").hidden = true; $("strip-empty").hidden = false; $("onair-strip").classList.remove("live");
   }, ov.duration_s * 1000);
 }
@@ -424,6 +435,7 @@ function connect() {
     addTicker(e); renderPitch();
     if (e.type === "goal") toast(`Goal! ${team(e.team).short} — ${player(e.player_id) ? `#${player(e.player_id).number} ` : ""}${e.player}`);
     soundFor(e);
+    Commentary.onEvent(e);
   });
   on("stats", (st) => { S.stats = st; renderScorebug(); renderStats(); });
   on("suggestion", upsert);
@@ -431,7 +443,7 @@ function connect() {
   on("overlays", (ovs) => {
     S.overlays.push(...ovs);
     const mine = ovs.find((o) => o.feed === S.feed);
-    if (mine) { showOnAir(mine); Sound.sting(); setTimeout(() => Sound.speak(Object.values(mine.slots || {}).join(". ")), 700); }
+    if (mine) { showOnAir(mine); Sound.sting(); Commentary.onAir(mine.slots); }
   });
   on("audit", addAudit);
   on("package", (p) => { renderPackage(p); toast(`Studio rundown ready (${p.phase.replace(/_/g, " ")})`); });
@@ -450,12 +462,7 @@ function soundFor(e) {
     case "full_time": Sound.swell(0.45, 2.5, 1100); return Sound.whistle([0.3, 0.3, 1.1]);
     case "foul": return Sound.whistle([0.22]);
     case "shot": return e.outcome === "goal" ? null : Sound.swell(e.outcome === "saved" ? 0.45 : 0.34, 0.6);
-    case "goal": {
-      Sound.swell(0.95, 4.5, 1700);
-      const p = player(e.player_id);
-      const sc = e.score || S.stats?.score, h = team(S.meta.home), a = team(S.meta.away);
-      return Sound.speak(`Goal! ${team(e.team).name}. ${p ? `Number ${p.number}, ` : ""}${e.player}.${sc ? ` ${h.short} ${sc[h.id]}, ${a.short} ${sc[a.id]}.` : ""}`);
-    }
+    case "goal": return Sound.swell(0.95, 4.5, 1700);
     default: return null;
   }
 }
@@ -578,5 +585,11 @@ function setView(is3d) {
 }
 setView((() => { try { return localStorage.getItem("pc_view") !== "2d"; } catch (_) { return true; } })());
 
+Commentary.bind({
+  player, team, get meta() { return S.meta; },
+  stats: () => S.stats, running: () => !!S.status?.running,
+});
+
 renderSound();
+fetch("/api/health").then((r) => r.json()).then((h) => Sound.setNeural(String(h.voice || "").startsWith("azure"))).catch(() => {});
 api("/api/state").then((st) => { loadFull(st); connect(); }).catch(() => toast("Could not reach the server. Refresh to try again.", true));
