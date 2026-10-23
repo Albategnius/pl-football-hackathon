@@ -252,8 +252,33 @@ function feedNote(ov) {
   return `${label} shows the TV text: ${String(ov.content_source || "").includes("fallback") ? "the AI rewrite was unavailable" : "the rewrite did not pass the Fact Checker"}.`;
 }
 
+// Each feed has its own look so the three outputs are told apart at a glance.
+function skinned(ov) {
+  const club = team(S.status?.club || S.meta.home);
+  const data = ov.feed === "club" ? { ...ov.data, team: club.id } : ov.data;
+  const label = ov.feed === "club" ? `${esc(club.short)} TV · club channel` : ov.feed === "casual" ? "Fan app" : "TV · main broadcast";
+  return `<div class="skin skin-${ov.feed}" style="--clubc:${club.color}"><span class="skin-label">${label}</span>${gfxHTML(ov.template, ov.slots, data)}</div>`;
+}
+
+function renderCompare(sugId) {
+  const ovs = ["main", "casual", "club"].map((f) => S.overlays.find((o) => o.suggestion_id === sugId && o.feed === f)).filter(Boolean);
+  if (!ovs.length) return;
+  const sug = S.suggestions.get(sugId);
+  $("feed-compare").innerHTML = `<h3>Feed versions <span class="muted small">${esc(sug?.candidate?.title || "")}</span></h3><div class="fc-grid">${
+    ovs.map((o) => {
+      const f = sug?.feeds?.[o.feed];
+      const note = o.feed === "main" ? "Exactly as you approved" : f?.pending ? "FeedAdapter writing…"
+        : f?.rewritten?.length ? `Rewritten by FeedAdapter${f.blocked?.length ? ` · ${f.blocked.length} line kept (Fact Checker)` : ""}` : "Same as TV (rewrite unavailable)";
+      return `<div class="fc fc-${o.feed}${o.feed === S.feed ? " current" : ""}"><div class="fc-head">${FEED_LABEL[o.feed]}</div>
+        ${Object.values(o.slots || {}).map((v, i) => `<p class="${i === 0 ? "fc-hl" : ""}">${esc(v)}</p>`).join("")}
+        <div class="fc-note${f?.pending ? " pending" : ""}">${note}</div></div>`;
+    }).join("")}</div>`;
+  $("feed-compare").hidden = false;
+}
+
 function showOnAir(ov, inPlace = false) {
-  $("screen-gfx").innerHTML = gfxHTML(ov.template, ov.slots, ov.data);
+  $("screen-gfx").innerHTML = skinned(ov);
+  renderCompare(ov.suggestion_id);
   $("feed-desc").textContent = `${S.feeds[ov.feed] || ""} ${feedNote(ov)}`;
   S.onScreen = ov.suggestion_id;
   if (inPlace) return;
@@ -466,6 +491,7 @@ function connect() {
     ovs.forEach((o) => { S.overlays = S.overlays.filter((x) => x.id !== o.id); S.overlays.push(o); });
     const mine = ovs.find((o) => o.feed === S.feed);
     if (!mine) return;
+    renderCompare(mine.suggestion_id);
     if (mine.update) {
       // FeedAdapter's version arrived: swap the text in place if that graphic is still on screen.
       if (S.onScreen === mine.suggestion_id) showOnAir(mine, true);

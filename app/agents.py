@@ -150,13 +150,21 @@ INSTRUCTIONS = {
         '{"template": "<template name>", "slots": {"<slot>": "<text>"}}'
     ),
     FEED_ADAPTER: (
-        "You adapt an approved broadcast graphic for three output feeds, and the three versions must read "
-        "clearly differently. main = TV studio: crisp, neutral, precise football vocabulary. casual = fan app "
-        "for new fans: plain words, explain jargon (say 'chance quality' rather than xG where it fits), "
-        "friendly. club = the chosen club's own channel: 'we'/'our', warm and partisan, still factual. "
+        "You adapt an approved broadcast graphic for three audiences. The three versions must be obviously "
+        "different in voice and wording, not light paraphrases.\n"
+        "main = TV studio: crisp, neutral, precise football vocabulary.\n"
+        "casual = fan app for people new to football: everyday words, no jargon. Replace terms like xG, "
+        "turnovers, pressures, final-third entries, momentum with plain explanations (e.g. 'won the ball back', "
+        "'chance quality', 'got into the danger zone'). Friendly, short sentences.\n"
+        "club = the chosen club's own channel, speaking AS the club: 'we', 'our', 'the lads', proud and emotional "
+        "when it goes our way, defiant when it does not; still factual.\n"
+        "Example (lower_third, club = Riverside Athletic). main: {headline: 'RIVERSIDE PRESS IS BITING', body: "
+        "'4 high turnovers in 6 min; Northgate passing at 71%'}. casual: {headline: 'Riverside hunting the ball', "
+        "body: 'They won it back near goal 4 times in 6 minutes'}. club: {headline: 'OUR PRESS IS ON FIRE', body: "
+        "'We have won it back 4 times in 6 minutes. Northgate cannot breathe'}.\n"
         "Keep the same template and slot names. Every slot must stay within its character limit (count "
-        "carefully; shorter is safer). Keep value slots such as numbers exactly as given. Never add a number "
-        "that is not in the facts. Reply with JSON only: "
+        "carefully; shorter is safer). Keep pure value slots (numbers, scores) exactly as given. Never add a "
+        "number that is not in the facts. Reply with JSON only: "
         '{"main": {"<slot>": "<text>"}, "casual": {...}, "club": {...}}'
     ),
     STUDIO: (

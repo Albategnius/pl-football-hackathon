@@ -364,3 +364,33 @@ body::before { content: ""; position: fixed; inset: -20%; z-index: -1; pointer-e
 .ht-mark { position: absolute; left: 47.9%; top: -1px; height: 5px; width: 2px; background: var(--cue); }
 .ht-mark { font-size: 0; }
 @media (max-width: 700px) { .break-card { inset: 6% 4%; padding: 10px 12px; gap: 4px; } .br-row { font-size: .75rem; } }
+
+/* ---------- per-feed looks ---------- */
+.skin { position: relative; }
+.skin-label { display: inline-block; margin-bottom: 6px; font-size: .7rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 4px; background: rgba(255, 255, 255, .08); color: var(--ink-2); }
+/* Fan app: friendly, rounded, light card */
+.skin-casual .skin-label { background: #8ab4ff33; color: #cfe0ff; border-radius: 999px; }
+.skin-casual .gfx { border-radius: 18px; font-variation-settings: "wdth" 100; }
+.skin-casual .gfx .hl { text-transform: none; letter-spacing: 0; border-radius: 18px 18px 0 0;
+  background: linear-gradient(135deg, #8ab4ff, #b98aff); color: #0b1020; }
+.skin-casual .gfx .bd { background: linear-gradient(180deg, #f4f7ff, #e6ecfb); color: #0b1020; font-variation-settings: "wdth" 100; }
+/* Club channel: club colours, bold, partisan */
+.skin-club .skin-label { background: var(--clubc); color: #fff; }
+.skin-club .gfx { box-shadow: 0 0 0 2px var(--clubc), 0 18px 40px -16px #000; }
+.skin-club .gfx .hl { background: linear-gradient(90deg, var(--clubc), color-mix(in srgb, var(--clubc) 60%, #000)); font-style: italic; }
+.skin-club .gfx .bd { background: linear-gradient(180deg, color-mix(in srgb, var(--clubc) 22%, #070b16), #070b16); }
+
+/* side-by-side comparison of the three feeds */
+.feed-compare { margin-top: 12px; }
+.feed-compare h3 { margin: 0 0 8px; font-size: .9rem; display: flex; gap: 8px; align-items: baseline; }
+.fc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fc { border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; padding: 10px; background: rgba(8, 12, 22, .45); display: grid; gap: 4px; align-content: start; }
+.fc.current { border-color: var(--accent); box-shadow: 0 0 0 2px #8ab4ff22; }
+.fc-head { font-size: .7rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.fc-casual .fc-head { color: #b9cfff; } .fc-club .fc-head { color: #ff9aa4; }
+.fc p { margin: 0; font-size: .86rem; line-height: 1.35; }
+.fc .fc-hl { font-weight: 800; }
+.fc-note { font-size: .74rem; color: var(--ok); margin-top: 2px; }
+.fc-note.pending { color: var(--accent); }
+@media (max-width: 700px) { .fc-grid { grid-template-columns: 1fr; } }
